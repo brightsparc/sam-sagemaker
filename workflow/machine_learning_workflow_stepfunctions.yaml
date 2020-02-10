@@ -1,0 +1,141 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template for AWS Step Functions - State Machine
+Parameters:
+  StepFunctionsWorkflowExecutionRole:
+    Type: String
+    Default: arn:aws:iam::691313291965:role/StepFunctionsWorkflowExecutionRole
+    Description: The name of the endpoint to be able to invoke
+Resources:
+  StateMachineComponent:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: MyTrainTransformDeploy_v1
+      DefinitionString: |-
+        {
+          "StartAt": "Train Step",
+          "States": {
+            "Train Step": {
+              "Resource": "arn:aws:states:::sagemaker:createTrainingJob.sync",
+              "Parameters": {
+                "AlgorithmSpecification": {
+                  "TrainingImage": "544295431143.dkr.ecr.ap-southeast-2.amazonaws.com/xgboost:1",
+                  "TrainingInputMode": "File"
+                },
+                "OutputDataConfig": {
+                  "S3OutputPath": "s3://sagemaker-ap-southeast-2-691313291965/sagemaker/DEMO-xgboost-regression/single-xgboost"
+                },
+                "StoppingCondition": {
+                  "MaxRuntimeInSeconds": 86400
+                },
+                "ResourceConfig": {
+                  "InstanceCount": 1,
+                  "InstanceType": "ml.m4.4xlarge",
+                  "VolumeSizeInGB": 5
+                },
+                "RoleArn.$": "$$.Execution.Input['ExecutionRoleArn']",
+                "InputDataConfig": [
+                  {
+                    "DataSource": {
+                      "S3DataSource": {
+                        "S3DataType": "S3Prefix",
+                        "S3Uri": "s3://sagemaker-ap-southeast-2-691313291965/sagemaker/DEMO-xgboost-regression/train",
+                        "S3DataDistributionType": "FullyReplicated"
+                      }
+                    },
+                    "ContentType": "libsvm",
+                    "ChannelName": "train"
+                  },
+                  {
+                    "DataSource": {
+                      "S3DataSource": {
+                        "S3DataType": "S3Prefix",
+                        "S3Uri": "s3://sagemaker-ap-southeast-2-691313291965/sagemaker/DEMO-xgboost-regression/validation",
+                        "S3DataDistributionType": "FullyReplicated"
+                      }
+                    },
+                    "ContentType": "libsvm",
+                    "ChannelName": "validation"
+                  }
+                ],
+                "HyperParameters": {
+                  "objective": "reg:linear",
+                  "num_round": "50",
+                  "max_depth": "5",
+                  "eta": "0.2",
+                  "gamme": "4",
+                  "min_child_weight": "6",
+                  "subsample": "0.7",
+                  "silent": "0"
+                },
+                "TrainingJobName.$": "$$.Execution.Input['JobName']"
+              },
+              "Type": "Task",
+              "Next": "Save model"
+            },
+            "Save model": {
+              "Parameters": {
+                "ExecutionRoleArn.$": "$$.Execution.Input['ExecutionRoleArn']",
+                "ModelName.$": "$$.Execution.Input['ModelName']",
+                "PrimaryContainer": {
+                  "Environment": {},
+                  "Image": "544295431143.dkr.ecr.ap-southeast-2.amazonaws.com/xgboost:1",
+                  "ModelDataUrl.$": "$['ModelArtifacts']['S3ModelArtifacts']"
+                }
+              },
+              "Resource": "arn:aws:states:::sagemaker:createModel",
+              "Type": "Task",
+              "Next": "Transform Input Dataset"
+            },
+            "Transform Input Dataset": {
+              "Resource": "arn:aws:states:::sagemaker:createTransformJob.sync",
+              "Parameters": {
+                "TransformJobName.$": "$$.Execution.Input['JobName']",
+                "ModelName.$": "$$.Execution.Input['ModelName']",
+                "TransformInput": {
+                  "DataSource": {
+                    "S3DataSource": {
+                      "S3DataType": "S3Prefix",
+                      "S3Uri": "s3://sagemaker-ap-southeast-2-691313291965/sagemaker/DEMO-xgboost-regression/test"
+                    }
+                  },
+                  "ContentType": "text/libsvm"
+                },
+                "TransformOutput": {
+                  "S3OutputPath": "s3://sagemaker-ap-southeast-2-691313291965/xgboost-2020-02-10-06-48-07-871"
+                },
+                "TransformResources": {
+                  "InstanceCount": 1,
+                  "InstanceType": "ml.m5.large"
+                }
+              },
+              "Type": "Task",
+              "Next": "Create Endpoint Config"
+            },
+            "Create Endpoint Config": {
+              "Resource": "arn:aws:states:::sagemaker:createEndpointConfig",
+              "Parameters": {
+                "EndpointConfigName.$": "$$.Execution.Input['ModelName']",
+                "ProductionVariants": [
+                  {
+                    "InitialInstanceCount": 1,
+                    "InstanceType": "ml.m5.large",
+                    "ModelName.$": "$$.Execution.Input['ModelName']",
+                    "VariantName": "AllTraffic"
+                  }
+                ]
+              },
+              "Type": "Task",
+              "Next": "Create Endpoint"
+            },
+            "Create Endpoint": {
+              "Resource": "arn:aws:states:::sagemaker:createEndpoint",
+              "Parameters": {
+                "EndpointConfigName.$": "$$.Execution.Input['ModelName']",
+                "EndpointName.$": "$$.Execution.Input['EndpointName']"
+              },
+              "Type": "Task",
+              "End": true
+            }
+          }
+        }
+      RoleArn: !Ref StepFunctionsWorkflowExecutionRole

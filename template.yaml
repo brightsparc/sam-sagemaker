@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Sample SAM Template for sam-sagemaker
+
+Parameters:
+  EndpointName:
+    Type: String
+    Default: regression-c0a6afb44bb111eaabaaebff58b910ef
+    Description: The name of the endpoint to be able to invoke
+  SageMakerVariant:
+    Description: Name of the SageMaker variant
+    Default: 'AllTraffic'
+    Type: String
+  AutoScalingMinCapacity:
+    Default: '1'
+    Description: Minimum number of instances for endpoint
+    Type: Number
+  AutoScalingMaxCapacity:
+    Default: '3'
+    Description: Maximum number of instances for endpoint
+    Type: Number
+  AutoScalingCoolDownPeriod:
+    Default: '600'
+    Description: The amount of time, in seconds, after a scaling activity completes before any further trigger-related scaling activities can start
+    Type: Number
+  AutoScalingInvocationsPerInstance:
+    Default: '100'
+    Description: The average number of times per minute that each instance for a variant is invoked
+    Type: Number
+    
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+
+Resources:
+  RegressionFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: regression/
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Role: !GetAtt RegressionFunctionRole.Arn
+      Environment:
+        Variables:
+          ENDPOINT_NAME: !Ref EndpointName
+      Events:
+        Invoke:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /regression
+            Method: post
+
+  RegressionFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+        Version: '2012-10-17'
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: arn:aws:logs:*:*:*
+            Version: '2012-10-17'
+          PolicyName: LambdaLogging
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - sagemaker:InvokeEndpoint
+                Effect: Allow
+                Resource: !Sub "arn:aws:sagemaker:*:*:endpoint/${EndpointName}"
+            Version: '2012-10-17'
+          PolicyName: SageMakerInvokeEndpoint
+
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties: 
+      MinCapacity: !Ref AutoScalingMinCapacity
+      MaxCapacity: !Ref AutoScalingMaxCapacity
+      ResourceId: !Sub endpoint/${EndpointName}/variant/${SageMakerVariant}
+      RoleARN: !GetAtt AutoScalingRole.Arn
+      ScalableDimension: sagemaker:variant:DesiredInstanceCount
+      ServiceNamespace: sagemaker
+
+  AutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: AutoScalingTarget
+    Properties: 
+      PolicyName: !Sub SageMaker-${EndpointName}
+      PolicyType: TargetTrackingScaling
+      ResourceId: !Sub endpoint/${EndpointName}/variant/${SageMakerVariant}
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration: 
+        PredefinedMetricSpecification: 
+          PredefinedMetricType: SageMakerVariantInvocationsPerInstance
+        ScaleInCooldown: !Ref AutoScalingCoolDownPeriod
+        ScaleOutCooldown: !Ref AutoScalingCoolDownPeriod
+        TargetValue: !Ref AutoScalingInvocationsPerInstance
+
+  AutoScalingRole: 
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - sagemaker.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: "AutoscalingPolicySagemaker"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              -
+                Effect: "Allow"
+                Action:
+                  - "sagemaker:DescribeEndpoint"
+                  - "sagemaker:DescribeEndpointConfig"
+                  - "sagemaker:UpdateEndpointWeightsAndCapacities"
+                Resource: !Sub "arn:aws:sagemaker:*:*:endpoint/${EndpointName}"
+              -
+                Effect: "Allow"
+                Action:
+                  - "application-autoscaling:*"
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action:
+                  - "cloudwatch:PutMetricAlarm"
+                  - "cloudwatch:DescribeAlarms"
+                  - "cloudwatch:DeleteAlarms"
+                Resource: "*"
+              -
+                Effect: "Allow"
+                Action: iam:CreateServiceLinkedRole
+                Resource: "arn:aws:iam::*:role/aws-service-role/sagemaker.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_SageMakerEndpoint"
+                Condition: 
+                  StringLike: 
+                    iam:AWSServiceName: sagemaker.application-autoscaling.amazonaws.com 
+        
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  RegressionApi:
+    Description: "API Gateway endpoint URL for Prod stage for Regression function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/regression/"
+  RegressionFunction:
+    Description: "Regression Lambda Function ARN"
+    Value: !GetAtt RegressionFunction.Arn
+  RegressionFunctionRoleIamRole:
+    Description: "Explicit IAM Role created for Regression function"
+    Value: !GetAtt RegressionFunctionRole.Arn
+  
