@@ -4,11 +4,9 @@ Description: >
   Sample SAM Template for sam-sagemaker.
   Switch AliasName and EndpointName/CoolDownEndpointName to deploy.
 Parameters:
-  AliasName:
+  CommitId:
     Type : String
-    Default: green
-    Description: The Alias as either "blue" or "green"
-    AllowedValues: ["blue", "green"]
+    Description: The commit id associated with the endpoint
   EndpointName:
     Type: String
     Default: regression-c0a6afb44bb111eaabaaebff58b910ef
@@ -69,13 +67,14 @@ Resources:
   RegressionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
+      FunctionName: !Sub '${AWS::StackName}_RegressionFunction'
       CodeUri: regression/
       Handler: app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt RegressionFunctionRole.Arn
-      AutoPublishAlias: !Ref AliasName
+      AutoPublishAlias: "live"
       DeploymentPreference:
-        Type: AllAtOnce #Canary10Percent5Minutes
+        Type: Canary10Percent5Minutes #AllAtOnce
         Alarms:
           # A list of alarms that you want to monitor
           - !Ref AliasErrorMetricGreaterThanZeroAlarm
@@ -92,7 +91,7 @@ Resources:
             TriggerTargetArn: !Ref DeploymentCompleteTopic          
       Environment:
         Variables:
-          ALIAS_NAME: !Ref AliasName
+          COMMIT_ID: !Ref CommitId
           ENDPOINT_NAME: !Ref EndpointName
       Events:
         Invoke:
@@ -129,6 +128,7 @@ Resources:
   PreTrafficLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub 'CodeDeployHook_${AWS::StackName}_PreTrafficLambdaFunction' # HACK 
       CodeUri: regression/
       Handler: pre_traffic_hook.lambda_handler
       Runtime: python3.7
@@ -157,6 +157,7 @@ Resources:
   PostTrafficLambdaFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub 'CodeDeployHook_${AWS::StackName}_PostTrafficLambdaFunction' # HACK 
       CodeUri: regression/
       Handler: post_traffic_hook.lambda_handler
       Runtime: python3.7
@@ -169,6 +170,13 @@ Resources:
                 - sagemaker:DescribeEndpoint
               Resource: 
                 "arn:aws:sagemaker:*:*:endpoint/*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - codedeploy:PutLifecycleEventHookExecutionStatus
+              Resource:
+                !Sub 'arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*'
       DeploymentPreference:
         Enabled: False
       Environment:
@@ -184,7 +192,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: Resource
-          Value: !Sub "${RegressionFunction}:${AliasName}"
+          Value: !Sub "${RegressionFunction}:live"
         - Name: FunctionName
           Value: !Ref RegressionFunction
       EvaluationPeriods: 2
@@ -201,7 +209,7 @@ Resources:
       ComparisonOperator: GreaterThanThreshold
       Dimensions:
         - Name: Resource
-          Value: !Sub "${RegressionFunction}:${AliasName}"
+          Value: !Sub "${RegressionFunction}:live"
         - Name: FunctionName
           Value: !Ref RegressionFunction
         - Name: ExecutedVersion

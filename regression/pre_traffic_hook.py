@@ -31,7 +31,8 @@ def lambda_handler(event, context):
     # Print the event
     current_version = os.environ['CURRENT_VERSION']
     endpoint_name = os.environ['ENDPOINT_NAME']
-    print('version: {} endpoint: {} event:'.format(current_version, endpoint_name, json.dumps(event)))
+    print('version: {} endpoint: {} event: {}'.format(
+        current_version, endpoint_name, json.dumps(event)))
 
     # Get boto3 sagemaker client and endpoint
     sm = boto3.client('sagemaker-runtime')
@@ -50,7 +51,7 @@ def lambda_handler(event, context):
             Accept='application/json'
         )
         predictions = response['Body'].read().decode('utf-8')
-        print(predictions)
+        print('predictions', predictions)
         if round(float(predictions))!=9:
             error_message = "Expected predicions to ~= 9"
     except ClientError as e:
@@ -67,7 +68,7 @@ def lambda_handler(event, context):
                 lifecycleEventHookExecutionId=event['LifecycleEventHookExecutionId'],
                 status='Failed'
             )
-            print(response)
+            print('put_lifecycle_failed', response)
             return {
                 "statusCode": 400,
                 "message": error_message
@@ -78,7 +79,7 @@ def lambda_handler(event, context):
                 lifecycleEventHookExecutionId=event['LifecycleEventHookExecutionId'],
                 status='Succeeded'
             )
-            print(response)
+            print('put_lifecycle_succeeded', response)
             return {
                 "statusCode": 200,
             }    

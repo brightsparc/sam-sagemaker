@@ -1,0 +1,12 @@
+version: 0.0
+Resources:
+  - RegressionFunction:
+      Type: AWS::Lambda::Function
+      Properties:
+        Name: "sam-sagemaker_RegressionFunction"
+        Alias: "live"
+        CurrentVersion: "1"
+        TargetVersion: "2"
+Hooks:
+  - BeforeAllowTraffic: "CodeDeployHook_sam-sagemaker_PreTrafficLambdaFunction"
+  - AfterAllowTraffic: "CodeDeployHook_sam-sagemaker_PostTrafficLambdaFunction"

@@ -28,9 +28,10 @@ def lambda_handler(event, context):
     # See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-sagemaker-endpoint.html
 
     # Print the event
-    alias_name = os.environ['ALIAS_NAME']
+    commit_id = os.environ['COMMIT_ID']
     endpoint_name = os.environ['ENDPOINT_NAME']
-    print('alias: {} endpoint: {} event:'.format(alias_name, endpoint_name, json.dumps(event)))
+    print('commit id: {} endpoint: {} event: {}'.format(
+        commit_id, endpoint_name, json.dumps(event)))
 
     # Get posted body and content type
     content_type = event['headers'].get('Content-Type', 'text/libsvm')
@@ -54,7 +55,7 @@ def lambda_handler(event, context):
     return {
         "statusCode": 200,
         "body": json.dumps({
-            "alias": alias_name,
+            "version": commit_id,
             "predictions": predictions
         }),
     }

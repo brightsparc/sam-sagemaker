@@ -252,3 +252,7 @@ samconfig.toml
 # Excluded the packaged file from deploy
 
 packaged.yaml
+
+# Exclude commit file from regression
+
+regression/commit.txt
