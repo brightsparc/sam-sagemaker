@@ -41,7 +41,7 @@ def lambda_handler(event, context):
 
     try:
         # First check the endpoint is in service
-        response = sm.describe_endpoint(EndpointName='regression-c0a6afb44bb111eaabaaebff58b910ef')
+        response = sm.describe_endpoint(EndpointName=endpoint_name)
         print('describe_endpoint', response)
         if response['EndpointStatus'] != "InService":
             error_message = "Unable to update endpoint not InService"

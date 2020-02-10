@@ -25,7 +25,7 @@ Parameters:
     Type: String
   AutoScalingEnabled:
     Type: String
-    Default: "False"
+    Default: "True"
     Description: Switch to enable AutoScaling
     AllowedValues: ["True", "False"]
   AutoScalingMinCapacity:
