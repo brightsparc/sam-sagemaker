@@ -27,12 +27,11 @@ def lambda_handler(event, context):
     # Ensure we have permissions
     # See: https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-sagemaker-endpoint.html
 
-    # Get boto3 sagemaker client and endpoint
-    client = boto3.client('sagemaker-runtime')
-    endpoint_name = os.environ['ENDPOINT_NAME']
-
     # Print the event
-    print('event', json.dumps(event))
+    commit_id = os.environ['COMMIT_ID']
+    endpoint_name = os.environ['ENDPOINT_NAME']
+    print('commit id: {} endpoint: {} event: {}'.format(
+        commit_id, endpoint_name, json.dumps(event)))
 
     # Get posted body and content type
     content_type = event['headers'].get('Content-Type', 'text/libsvm')
@@ -40,8 +39,11 @@ def lambda_handler(event, context):
     payload = body.get('data')
     print('payload', endpoint_name, content_type, payload)
 
+    # Get boto3 sagemaker client and endpoint
+    sm = boto3.client('sagemaker-runtime')
+
     # Invoke endpoint
-    response = client.invoke_endpoint(
+    response = sm.invoke_endpoint(
         EndpointName=endpoint_name,
         Body=payload,
         ContentType=content_type,
@@ -53,6 +55,7 @@ def lambda_handler(event, context):
     return {
         "statusCode": 200,
         "body": json.dumps({
+            "version": commit_id,
             "predictions": predictions
         }),
     }
