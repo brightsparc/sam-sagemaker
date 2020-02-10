@@ -248,3 +248,7 @@ $RECYCLE.BIN/
 # Don't save saml config
 
 samconfig.toml
+
+# Excluded the packaged file from deploy
+
+packaged.yaml

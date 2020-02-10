@@ -112,6 +112,16 @@ To delete the sample application that you created, use the AWS CLI. Assuming you
 aws cloudformation delete-stack --stack-name sam-sagemaker
 ```
 
+## Cloud Formation direct
+
+Alternatively you can package and deploy directly with aws cli
+
+```bash
+aws cloudformation package --template-file template.yaml --output-template-file packaged.yaml --s3-bucket <bucket>
+aws cloudformation deploy --template-file packaged.yaml --capabilities CAPABILITY_IAM --stack-name sam-sagemaker
+
+```
+
 ## Resources
 
 See the [AWS SAM developer guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html) for an introduction to SAM specification, the SAM CLI, and serverless application concepts.

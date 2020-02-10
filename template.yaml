@@ -1,16 +1,35 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Sample SAM Template for sam-sagemaker
-
+Description: >
+  Sample SAM Template for sam-sagemaker.
+  Switch AliasName and EndpointName/CoolDownEndpointName to deploy.
 Parameters:
+  AliasName:
+    Type : String
+    Default: green
+    Description: The Alias as either "blue" or "green"
+    AllowedValues: ["blue", "green"]
   EndpointName:
     Type: String
     Default: regression-c0a6afb44bb111eaabaaebff58b910ef
-    Description: The name of the endpoint to be able to invoke
-  SageMakerVariant:
+    Description: The name of the endpoint to switch to
+  EndpointVariant:
     Description: Name of the SageMaker variant
     Default: 'AllTraffic'
     Type: String
+  CoolDownEndpointName:
+    Type: String
+    Default: regression-fb4528664bd011eaabaaebff58b910ef
+    Description: The name of the endpoint to cool down post deploy
+  CoolDownVariant:
+    Description: Name of the SageMaker variant for cooldown
+    Default: 'AllTraffic'
+    Type: String
+  AutoScalingEnabled:
+    Type: String
+    Default: "False"
+    Description: Switch to enable AutoScaling
+    AllowedValues: ["True", "False"]
   AutoScalingMinCapacity:
     Default: '1'
     Description: Minimum number of instances for endpoint
@@ -27,13 +46,26 @@ Parameters:
     Default: '100'
     Description: The average number of times per minute that each instance for a variant is invoked
     Type: Number
-    
+
+Conditions:
+  CreateAutoScaling: !Equals [!Ref AutoScalingEnabled, "True"]
+
+# Attempt to add canary deployments
+# https://aws.amazon.com/blogs/compute/implementing-canary-deployments-of-aws-lambda-functions-with-alias-traffic-shifting/
+
+# But Code deploy doesn't allways trigger for lambda env change so could just add SFN
+# https://github.com/aws-samples/aws-lambda-deploy
+# See also: https://aws.amazon.com/blogs/compute/implementing-canary-deployments-of-aws-lambda-functions-with-alias-traffic-shifting/
+
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
     Timeout: 3
 
 Resources:
+  DeploymentCompleteTopic:
+    Type: AWS::SNS::Topic
+        
   RegressionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
@@ -41,8 +73,26 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.7
       Role: !GetAtt RegressionFunctionRole.Arn
+      AutoPublishAlias: !Ref AliasName
+      DeploymentPreference:
+        Type: AllAtOnce #Canary10Percent5Minutes
+        Alarms:
+          # A list of alarms that you want to monitor
+          - !Ref AliasErrorMetricGreaterThanZeroAlarm
+          - !Ref LatestVersionErrorMetricGreaterThanZeroAlarm
+        Hooks:
+          # Validation Lambda functions that are run before & after traffic shifting
+          PreTraffic: !Ref PreTrafficLambdaFunction
+          PostTraffic: !Ref PostTrafficLambdaFunction
+        TriggerConfigurations:
+          - TriggerEvents:
+              - DeploymentSuccess
+              - DeploymentFailure
+            TriggerName: DeploymentCompleteTrigger
+            TriggerTargetArn: !Ref DeploymentCompleteTopic          
       Environment:
         Variables:
+          ALIAS_NAME: !Ref AliasName
           ENDPOINT_NAME: !Ref EndpointName
       Events:
         Invoke:
@@ -63,53 +113,136 @@ Resources:
               Service:
                 - lambda.amazonaws.com
         Version: '2012-10-17'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'        
       Policies:
         - PolicyDocument:
             Statement:
-              - Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Effect: Allow
-                Resource: arn:aws:logs:*:*:*
-            Version: '2012-10-17'
-          PolicyName: LambdaLogging
-        - PolicyDocument:
-            Statement:
-              - Action:
+              - Effect: Allow
+                Action:
                   - sagemaker:InvokeEndpoint
-                Effect: Allow
-                Resource: !Sub "arn:aws:sagemaker:*:*:endpoint/${EndpointName}"
+                Resource: 
+                  "arn:aws:sagemaker:*:*:endpoint/*" 
             Version: '2012-10-17'
           PolicyName: SageMakerInvokeEndpoint
+  
+  PreTrafficLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: regression/
+      Handler: pre_traffic_hook.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - sagemaker:InvokeEndpoint
+              Resource: 
+                "arn:aws:sagemaker:*:*:endpoint/*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - codedeploy:PutLifecycleEventHookExecutionStatus
+              Resource:
+                !Sub 'arn:${AWS::Partition}:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ServerlessDeploymentApplication}/*'
+      DeploymentPreference:
+        Enabled: False
+      Environment:
+        Variables:
+          CURRENT_VERSION: !GetAtt RegressionFunction.Version.Version
+          ENDPOINT_NAME: !Ref EndpointName
 
+  PostTrafficLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: regression/
+      Handler: post_traffic_hook.lambda_handler
+      Runtime: python3.7
+      Policies:
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Action:
+                - sagemaker:UpdateEndpointWeightsAndCapacities
+                - sagemaker:DescribeEndpoint
+              Resource: 
+                "arn:aws:sagemaker:*:*:endpoint/*"
+      DeploymentPreference:
+        Enabled: False
+      Environment:
+        Variables:
+          CURRENT_VERSION: !GetAtt RegressionFunction.Version.Version
+          ENDPOINT_NAME: !Ref CoolDownEndpointName
+          VARIANT_NAME: !Ref CoolDownVariant
+
+  AliasErrorMetricGreaterThanZeroAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${RegressionFunction}:${AliasName}"
+        - Name: FunctionName
+          Value: !Ref RegressionFunction
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+
+  LatestVersionErrorMetricGreaterThanZeroAlarm:
+    Type: "AWS::CloudWatch::Alarm"
+    Properties:
+      AlarmDescription: Lambda Function Error > 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Resource
+          Value: !Sub "${RegressionFunction}:${AliasName}"
+        - Name: FunctionName
+          Value: !Ref RegressionFunction
+        - Name: ExecutedVersion
+          Value: !GetAtt RegressionFunction.Version.Version
+      EvaluationPeriods: 2
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 60
+      Statistic: Sum
+      Threshold: 0
+            
   AutoScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: CreateAutoScaling
     Properties: 
       MinCapacity: !Ref AutoScalingMinCapacity
       MaxCapacity: !Ref AutoScalingMaxCapacity
-      ResourceId: !Sub endpoint/${EndpointName}/variant/${SageMakerVariant}
+      ResourceId: !Sub endpoint/${EndpointName}/variant/${EndpointVariant}
       RoleARN: !GetAtt AutoScalingRole.Arn
       ScalableDimension: sagemaker:variant:DesiredInstanceCount
       ServiceNamespace: sagemaker
 
   AutoScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: CreateAutoScaling
     DependsOn: AutoScalingTarget
     Properties: 
       PolicyName: !Sub SageMaker-${EndpointName}
       PolicyType: TargetTrackingScaling
-      ResourceId: !Sub endpoint/${EndpointName}/variant/${SageMakerVariant}
+      ResourceId: !Sub endpoint/${EndpointName}/variant/${EndpointVariant}
       ScalingTargetId: !Ref AutoScalingTarget
       TargetTrackingScalingPolicyConfiguration: 
         PredefinedMetricSpecification: 
-          PredefinedMetricType: SageMakerVariantInvocationsPerInstance
+          PredefinedMetricType: EndpointVariantInvocationsPerInstance
         ScaleInCooldown: !Ref AutoScalingCoolDownPeriod
         ScaleOutCooldown: !Ref AutoScalingCoolDownPeriod
         TargetValue: !Ref AutoScalingInvocationsPerInstance
 
   AutoScalingRole: 
     Type: AWS::IAM::Role
+    Condition: CreateAutoScaling
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -133,7 +266,7 @@ Resources:
                   - "sagemaker:DescribeEndpoint"
                   - "sagemaker:DescribeEndpointConfig"
                   - "sagemaker:UpdateEndpointWeightsAndCapacities"
-                Resource: !Sub "arn:aws:sagemaker:*:*:endpoint/${EndpointName}"
+                Resource: "arn:aws:sagemaker:*:*:endpoint/*"
               -
                 Effect: "Allow"
                 Action:
@@ -167,4 +300,7 @@ Outputs:
   RegressionFunctionRoleIamRole:
     Description: "Explicit IAM Role created for Regression function"
     Value: !GetAtt RegressionFunctionRole.Arn
+  RegressionDeploymentApplication:
+    Description: "The deployment application for "
+    Value: !Ref ServerlessDeploymentApplication
   
