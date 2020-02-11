@@ -38,6 +38,9 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Sub |
           version: 0.2
+          env:
+            exported-variables:
+              - STEPFUNCTION_ARN          
           phases:
             install:
               runtime-versions:
@@ -280,6 +283,7 @@ Resources:
           Actions:
             -
               Name: TrainModel
+              Namespace: TrainVariables              
               InputArtifacts:
                 - Name: ModelSourceOutput
               OutputArtifacts:

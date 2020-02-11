@@ -256,3 +256,7 @@ packaged.yaml
 # Exclude commit file from regression
 
 regression/commit.txt
+
+# Exclude cloud formation
+
+cloud_formation/

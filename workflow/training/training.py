@@ -124,4 +124,10 @@ execution = workflow.execute(
     inputs=inputs
 )
 
-print('started', execution.execution_arn)
+# Write out the step functions ARN
+stepfunction_arn = execution.execution_arn
+
+with open( 'cloud_formation/training.vars', 'w' ) as f:
+    f.write('export STEPFUNCTION_ARN={}'.format(stepfunction_arn))
+
+print('started', stepfunction_arn)
