@@ -68,6 +68,8 @@ job_name = uuid.uuid1().hex
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
 
+# TODO: Upload source files here given we are not calling fit
+
 debug_hook_config = DebuggerHookConfig(
     s3_output_path=debug_output_path,
     hook_parameters={
@@ -117,6 +119,11 @@ xgb = XGBoost(
     debugger_hook_config=debug_hook_config,
     rules=debug_rules
 )
+
+# Upload model code to s3
+
+xgb.prepare_workflow_for_training()
+print('uploaded code to: {}'.format(xgb.uploaded_code.s3_prefix))
 
 # Create Workflow steps
 

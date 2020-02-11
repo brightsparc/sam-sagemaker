@@ -66,7 +66,7 @@ Resources:
                 - echo "Running training.py"
                 - python workflow/training/training.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION
                 - echo "Running suggest_baseline.py"
-                - python workflow/training/suggest_baseline.py ${DataBucket}" "${BucketPrefix}" 
+                - python workflow/training/suggest_baseline.py "${DataBucket}" "${BucketPrefix}" 
             post_build:
               commands:
                 - echo "Exporting env vars"
@@ -328,8 +328,6 @@ Resources:
             Service: [states.amazonaws.com]
         Version: '2012-10-17'
       Path: /
-      ManagedPolicyArns:
-      - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
       Policies:
         - PolicyName: SageMakerAccess
           PolicyDocument:
@@ -460,6 +458,8 @@ Resources:
               Service: [codebuild.amazonaws.com]
         Version: '2012-10-17'
       Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
       Policies:
         - PolicyName: UploadAccess
           PolicyDocument:
@@ -477,6 +477,8 @@ Resources:
               - Action:
                 - iam:PassRole
                 Effect: Allow
-                Resource: !GetAtt SagemakerExecutionRole.Arn
+                Resource: 
+                  - !GetAtt SagemakerExecutionRole.Arn
+                  - !GetAtt WorkflowExecutionRole.Arn
   
     
