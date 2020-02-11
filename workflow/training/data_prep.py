@@ -9,13 +9,13 @@ prefix = sys.argv[2]
 start = time.time()
 print('Data prep started...')
 
-# Copy abalone files
-# see: https://github.com/awslabs/amazon-sagemaker-examples/tree/master/step-functions-data-science-sdk
+# Based on model monitor example using CSE-CIC-IDS2018 dataset
+# see also: https://github.com/aws-samples/reinvent2019-aim362-sagemaker-debugger-model-monitor
 
 s3 = boto3.resource('s3')
 
-source_bucket_name = "mlops-ap-southeast-2-691313291965"
-source_bucket_prefix = "data/"
+source_bucket_name = "endtoendmlapp"
+source_bucket_prefix = "aim362/data/"
 source_bucket = s3.Bucket(source_bucket_name)
 
 for s3_object in source_bucket.objects.filter(Prefix=source_bucket_prefix):

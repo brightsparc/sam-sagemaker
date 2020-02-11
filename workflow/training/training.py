@@ -1,65 +1,131 @@
 ## TODO: 
 
 import boto3
+from botocore.exceptions import ClientError
 import time
 import sys
 
-# Import sagemaker functions
+# Import Sagemaker and debugger config
 import sagemaker
-from sagemaker.amazon.amazon_estimator import get_image_uri
+from sagemaker.xgboost import XGBoost
+from sagemaker.debugger import Rule, rule_configs, DebuggerHookConfig, CollectionConfig
 
-# AWS Data Science SDK
+# Import AWS Data Science SDK
 from stepfunctions import steps
 from stepfunctions.inputs import ExecutionInput
 from stepfunctions.workflow import Workflow
+
+# Get Arguments
 
 bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
 workflow_execution_role = sys.argv[4]
-model_name = sys.argv[5]
-commit_id = sys.argv[6]
+exp_name = sys.argv[5]
+trial_name = sys.argv[6]
 
-# Get region from boto3 session
-region = boto3.Session().region_name
+# Create Experiment and Trial
+
+start = time.time()
+print('Creating experiment: {} and trial: {}'.format(exp_name, trial_name))
+
+sm = boto3.client('sagemaker')
+
+try:
+    response = sm.create_experiment(
+        ExperimentName=exp_name,
+        DisplayName=exp_name,
+        Description='MLOps experiment'
+    )
+    print("Created experiment: %s" % response)
+except ClientError as e:
+    if e.response['Error']['Code'] == 'ValidationException':
+        print("Experiment %s already exists" % exp_name)
+    else:
+        print("Unexpected error: %s" % e)
+
+try:
+    response = sm.create_trial(
+        TrialName=trial_name,
+        DisplayName=trial_name,
+        ExperimentName=exp_name,
+    )
+    print("Created trial: %s" % response)
+except ClientError as e:
+    if e.response['Error']['Code'] == 'ValidationException':
+        print("Trial %s already exists" % trial_name)
+    else:
+        print("Unexpected error: %s" % e)
+
+# Create Estimator with debug hooks
+
 input_train_path = "s3://{}/{}/data/train".format(bucket_name, prefix)
 input_validation_path = "s3://{}/{}/data/validation".format(bucket_name, prefix)
 model_output_path =  "s3://{}/{}/model".format(bucket_name, prefix)
-job_name = "{}-{}".format(model_name, commit_id) # TODO: Add enviornment?
+debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
+model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
+job_name = "{}-{}".format(exp_name, trial_name)
+entry_point='train_xgboost.py'
+source_dir='workflow/training/'
 
-# SageMaker expects unique names for each job, model and endpoint. 
-# If these names are not unique the execution will fail. Pass these
-# dynamically for each execution using placeholders.
+debug_hooks = DebuggerHookConfig(
+    s3_output_path=debug_output_path,
+    hook_parameters={
+        "save_interval": "1"
+    },
+    collection_configs=[
+        CollectionConfig("hyperparameters"),
+        CollectionConfig("metrics"),
+        CollectionConfig("predictions"),
+        CollectionConfig("labels"),
+        CollectionConfig("feature_importance")
+    ]
+)
+
+debug_rules = [Rule.sagemaker(rule_configs.confusion(),
+    rule_parameters={
+        "category_no": "15",
+        "min_diag": "0.7",
+        "max_off_diag": "0.3",
+        "start_step": "17",
+        "end_step": "19"}
+)]
+
+hyperparameters = {
+    "max_depth": "10",
+    "eta": "0.2",
+    "gamma": "1",
+    "min_child_weight": "6",
+    "silent": "0",
+    "objective": "multi:softmax",
+    "num_class": "15",
+    "num_round": "20"
+}
+
+xgb = XGBoost(
+    base_job_name=job_name,
+    entry_point=entry_point,
+    source_dir=source_dir,
+    output_path=model_output_path,
+    code_location=model_code_location,
+    hyperparameters=hyperparameters,
+    train_instance_type="ml.m5.4xlarge",
+    train_instance_count=1,
+    framework_version="0.90-2",
+    py_version="py3",
+    role=sagemaker_execution_role,
+    debugger_hook_config=debug_rules,
+    rules=debug_rules
+)
+
+# Create Workflow steps
+
 execution_input = ExecutionInput(schema={
     'ExecutionRoleArn': str,
     'JobName': str, 
     'ModelName': str,
     'EndpointName': str
 })
-
-# Create estimator
-
-xgb = sagemaker.estimator.Estimator(
-    get_image_uri(region, 'xgboost'),
-    execution_input['ExecutionRoleArn'], 
-    train_instance_count = 1, 
-    train_instance_type = 'ml.m4.4xlarge',
-    train_volume_size = 5,
-    output_path = model_output_path,
-)
-
-xgb.set_hyperparameters(
-    objective = 'reg:linear',
-    num_round = 50,
-    max_depth = 5,
-    eta = 0.2,
-    gamme = 4,
-    min_child_weight = 6,
-    subsample = 0.7,
-    silent = 0
-)
-
-# Create steps
 
 training_step = steps.TrainingStep(
     'Train Step', 
@@ -81,8 +147,8 @@ endpoint_config_step = steps.EndpointConfigStep(
     "Create Endpoint Config",
     endpoint_config_name=execution_input['ModelName'],
     model_name=execution_input['ModelName'],
-    initial_instance_count=1, # TODO: Parameterize
-    instance_type='ml.m5.large' # TODO: Parameterize
+    initial_instance_count=1, 
+    instance_type='ml.m5.large'
 )
 
 endpoint_step = steps.EndpointStep(
@@ -99,35 +165,32 @@ workflow_definition = steps.Chain([
 ])
 
 workflow = Workflow(
-    name=model_name,
+    name=job_name,
     definition=workflow_definition,
     role=workflow_execution_role,
     execution_input=execution_input
 )
 
-# Write the cloud formation to execute in pipeline
- 
-with open('cloud_formation/training_workflow.yaml', 'w') as f:
-    f.write(workflow.get_cloudformation_template())
-
-# TEMP: Create or update workflow, and execute
-workflow.create()
-workflow.update(definition=workflow.definition)
-
 inputs={
     'ExecutionRoleArn': sagemaker_execution_role,
-    'JobName': job_name, 
+    'JobName': job_name,  
     'ModelName': job_name,
     'EndpointName': job_name
 }
+
+workflow.create()
+workflow.update(definition=workflow.definition)
 execution = workflow.execute(
     inputs=inputs
 )
 
-# Write out the step functions ARN
 stepfunction_arn = execution.execution_arn
+print('Workflow exectuted: {}'.format(stepfunction_arn))
+
+# Export environment variables
 
 with open( 'cloud_formation/training.vars', 'w' ) as f:
-    f.write('export STEPFUNCTION_ARN={}'.format(stepfunction_arn))
+    f.write('export JOB_NAME={0}\nexport STEPFUNCTION_ARN={1}'.format(job_name, stepfunction_arn))
 
-print('started', stepfunction_arn)
+end = time.time()
+print('Training launched in: {}'.format(end-start))

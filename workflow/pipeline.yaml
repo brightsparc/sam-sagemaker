@@ -9,24 +9,31 @@ Parameters:
     Description: GitHub UserName
     Type: String
   Repo:
-    Default: sagemaker-pipeline
+    Default: sam-sagemaker
     Description: GitHub Repo to pull from. Only the Name. not the URL
     Type: String
   Branch:
-    Default: master
+    Default: stepfunctions-workflow
     Description: Branch to use from Repo. Only the Name. not the URL
     Type: String
+  DataBucket:
+    Default: sagemaker-ap-southeast-2-691313291965
+    Type: String
+    Description: Name of the model
+  BucketPrefix:
+    Default: mlops
+    Type: String
+    Description: Name of the model
   ModelName:
     Type: String
     Description: Name of the model
 
-Resources:
-  
+Resources:  
   MLOpsLaunchJob:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub mlops-job-launcher-${ModelName}
-      Description: Trains machine learning model using SageMaker
+      Name: !Sub mlops-job-train-${ModelName} # Use: ${AWS::StackName}-job-train
+      Description: Create a cloud formation workflow to execute in next STEPFUNCTION_ARN
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
         Type: CODEPIPELINE
@@ -57,6 +64,8 @@ Resources:
               commands:
                 - echo "Running training.py"
                 - python workflow/training/training.py ${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION
+                - echo "Running suggest_baseline.py"
+                - python workflow/training/suggest_baseline.py ${DataBucket}" "${BucketPrefix}" 
             post_build:
               commands:
                 - echo "Exporting env vars"
@@ -65,92 +74,6 @@ Resources:
             files:
               - '**/*'
       TimeoutInMinutes: 30
-
-#   MLOpsLaunchJob:
-#     Type: "AWS::Lambda::Function"
-#     Properties: 
-#       FunctionName: !Sub mlops-job-launcher-${ModelName}
-#       Handler: index.lambda_handler
-#       MemorySize: 512
-#       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
-#       Runtime: python3.6
-#       Timeout: 60
-#       Code: 
-#         ZipFile: !Sub |
-#           import boto3
-#           import io
-#           import zipfile
-#           import json
-#           s3 = boto3.client('s3')
-#           sagemaker = boto3.client('sagemaker')
-#           cloudwatch_events = boto3.client('events')
-#           codepipeline = boto3.client('codepipeline')
-#           def lambda_handler(event, context):
-#               pipeline_name='${AWS::StackName}'
-              
-#               jobId = event["CodePipeline.job"]["id"]
-#               accountId = event["CodePipeline.job"]["accountId"]
-#               trainingJob = None
-#               try:
-#                   response = codepipeline.get_pipeline_state( name=pipeline_name )
-#                   executionId = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
-                  
-#                   print('Start training job for jobid[%s] executionId[%s]' % (jobId, executionId))
-                  
-#                   for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
-#                       if inputArtifacts['name'] == 'ModelSourceOutput':
-#                           s3Location = inputArtifacts['location']['s3Location']
-#                           zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
-#                           with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-#                               trainingJob = json.loads(z.read('trainingjob.json').decode('ascii'))
-                  
-#                   params_deploy = {
-#                       "Parameters": {
-#                           "ImageRepoName": "${ImageRepoName}",
-#                           "ImageTagName": "${ImageTagName}",
-#                           "ModelName": "${ModelName}",
-#                           "TrainJobId": executionId
-#                       }
-#                   }
-#                   for outputArtifacts in event["CodePipeline.job"]["data"]["outputArtifacts"]:
-#                       if outputArtifacts['name'] == 'ModelTrainOutput':
-#                           s3Location = outputArtifacts['location']['s3Location']
-                          
-#                           zip_bytes = io.BytesIO()
-#                           with zipfile.ZipFile(zip_bytes, "w") as z:
-#                               z.writestr('assets/deploy-model.json', json.dumps(params_deploy))
-                            
-#                           zip_bytes.seek(0)
-#                           s3.put_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'], Body=zip_bytes.read())
-              
-#                   if trainingJob is None:
-#                       raise(Exception("trainingjob.json wasn't found"))
-                  
-#                   # launch training job
-#                   trainingJob['TrainingJobName'] = 'mlops-${ModelName}-%s' % executionId
-#                   trainingJob['Tags'].append({'Key': 'jobid', 'Value': jobId})
-#                   print(trainingJob)
-#                   sagemaker.create_training_job(**trainingJob)
-                  
-#                   # enable monitoring event
-#                   cloudwatch_events.enable_rule( Name='mlops-job-monitor-${ModelName}')
-#                   # and update codepipeline
-#                   codepipeline.put_job_success_result(jobId=jobId)
-#               except Exception as e:
-#                   print(e)
-#                   resp = codepipeline.put_job_failure_result(
-#                       jobId=jobId,
-#                       failureDetails={
-#                           'type': 'ConfigurationError',
-#                           'message': str(e),
-#                           'externalExecutionId': context.aws_request_id
-#                       }
-#                   )
-#               return 'Done'
-#       Description: "Function that will start a new Sagemaker Training Job"
-#       Tags:
-#         - Key: Name
-#           Value: !Sub mlops-launch-job-${ModelName}
     
   MLOpsJobMonitor:
     Type: "AWS::Lambda::Function"
@@ -163,8 +86,6 @@ Resources:
       Timeout: 60
       Code: 
         ZipFile: !Sub |
-          # TODO: Update this to query the status of the SFN (which will complete when training is done)
-
           import boto3
           sagemaker = boto3.client('sagemaker')
           cloudwatch_events = boto3.client('events')
@@ -254,7 +175,7 @@ Resources:
     Type: "AWS::CodePipeline::Pipeline"
     Properties:
       Name: !Sub ${AWS::StackName}
-      RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+      RoleArn: !GetAtt MLOpsRole.Arn
       ArtifactStore:
           Type: S3
           Location: !Sub mlops-${AWS::Region}-${AWS::AccountId}
@@ -283,7 +204,6 @@ Resources:
           Actions:
             -
               Name: TrainModel
-              Namespace: TrainVariables              
               InputArtifacts:
                 - Name: ModelSourceOutput
               OutputArtifacts:
@@ -296,8 +216,9 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: 
-                    !Ref MLOpsLaunchJob
+                  !Ref MLOpsLaunchJob
               RunOrder: 1
+            # TODO: Add suggest baseline
         -
           Name: TrainApproval
           Actions:
@@ -328,7 +249,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+                RoleArn: !GetAtt MLOpsRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM
                 StackName: !Sub ${AWS::StackName}-deploy-dev
                 TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
@@ -365,7 +286,7 @@ Resources:
                 
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+                RoleArn: !GetAtt MLOpsRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM
                 StackName: !Sub ${AWS::StackName}-deploy-prd
                 TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
@@ -377,7 +298,7 @@ Resources:
   SagemakerExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub sagemaker-role-${ModelName}
+      RoleName: !Sub ${AWS::StackName}-sagemaker-role 
       AssumeRolePolicyDocument:
         Statement:
         - Action: ['sts:AssumeRole']
@@ -404,75 +325,110 @@ Resources:
   WorkflowExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub stepfunctions-role-${ModelName}
+      RoleName: !Sub ${AWS::StackName}-stepfunctions-role
       AssumeRolePolicyDocument:
-      Statement:
-      - Action: ['sts:AssumeRole']
-        Effect: Allow
-        Principal:
-        Service: [states.amazonaws.com]
-      Version: '2012-10-17'
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [states.amazonaws.com]
+        Version: '2012-10-17'
       Path: /
-      # ManagedPolicyArns:
-      # - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
-    Policies:
-      - PolicyName: SageMakerAccess
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-          - Action:
-            - sagemaker:*
-            - lambda:InvokeFunction
-            Resource: "*"
-            Effect: Allow
-          - Condition:
-            StringEquals:
-              iam:PassedToService: sagemaker.amazonaws.com
-            Action:
-            - iam:PassRole
-            Resource: "*"
-            Effect: Allow
-          - Action:
-            - events:PutTargets
-            - events:PutRule
-            - events:DescribeRule
-            Resource:
-            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
-            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
-            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
-            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForECSTaskRule
-            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
-            Effect: Allow
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+      Policies:
+        - PolicyName: SageMakerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - sagemaker:*
+                - lambda:InvokeFunction
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+                Effect: Allow
+              - Action:
+                - events:PutTargets
+                - events:PutRule
+                - events:DescribeRule
+                Resource:
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForECSTaskRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
+                Effect: Allow
+
+  MLOpsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-cfn-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - sagemaker:*
+                  - iam:PassRole
+                  - s3:*
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DeleteAlarms
+                Effect: Allow
+                Resource: '*'
 
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub codebuild-role-${ModelName}
+      RoleName: !Sub ${AWS::StackName}-codebuild-role
       AssumeRolePolicyDocument:
-      Statement:
-      - Action: ['sts:AssumeRole']
-          Effect: Allow
-          Principal:
-          Service: [codebuild.amazonaws.com]
+        Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [codebuild.amazonaws.com]
       Version: '2012-10-17'
       Path: /
       Policies:
         - PolicyName: UploadAccess
           PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Action:
-            - codepipeline:*
-            - sagemaker:*
-            - s3:*
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-            Effect: Allow
-            Resource: '*'
-            - Action:
-            - iam:PassRole
-            Effect: Allow
-            Resource: !GetAtt SagemakerExecutionRole.Arn
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - codepipeline:*
+                - sagemaker:*
+                - s3:*
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                - iam:PassRole
+                Effect: Allow
+                Resource: !GetAtt SagemakerExecutionRole.Arn
   
     
