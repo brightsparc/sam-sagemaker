@@ -1,0 +1,474 @@
+Description: Create a CodePipeline for a Machine Learning Model
+Parameters:
+  GitHubToken:
+    NoEcho: true
+    Description: Secret. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af OAuthToken with access to Repo. Go to https://github.com/settings/tokens
+    Type: String
+  GitHubUser:
+    Default: brightsparc
+    Description: GitHub UserName
+    Type: String
+  Repo:
+    Default: sagemaker-pipeline
+    Description: GitHub Repo to pull from. Only the Name. not the URL
+    Type: String
+  Branch:
+    Default: master
+    Description: Branch to use from Repo. Only the Name. not the URL
+    Type: String
+  ModelName:
+    Type: String
+    Description: Name of the model
+
+Resources:
+  
+  MLOpsLaunchJob:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub mlops-job-launcher-${ModelName}
+      Description: Trains machine learning model using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo "Installing requirements and aws datascience sdk form source"
+                - pip install -r workflow/training/requirements
+                - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
+            pre_build:
+              commands:
+                - echo "Running data_prep.py"
+                - python workflow/training/data_prep.py "${DataBucket}" "${BucketPrefix}"
+            build:
+              commands:
+                - echo "Running training.py"
+                - python workflow/training/training.py ${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION
+            post_build:
+              commands:
+                - echo "Exporting env vars"
+                - source cloud_formation/training.vars
+          artifacts:
+            files:
+              - '**/*'
+      TimeoutInMinutes: 30
+
+#   MLOpsLaunchJob:
+#     Type: "AWS::Lambda::Function"
+#     Properties: 
+#       FunctionName: !Sub mlops-job-launcher-${ModelName}
+#       Handler: index.lambda_handler
+#       MemorySize: 512
+#       Role: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+#       Runtime: python3.6
+#       Timeout: 60
+#       Code: 
+#         ZipFile: !Sub |
+#           import boto3
+#           import io
+#           import zipfile
+#           import json
+#           s3 = boto3.client('s3')
+#           sagemaker = boto3.client('sagemaker')
+#           cloudwatch_events = boto3.client('events')
+#           codepipeline = boto3.client('codepipeline')
+#           def lambda_handler(event, context):
+#               pipeline_name='${AWS::StackName}'
+              
+#               jobId = event["CodePipeline.job"]["id"]
+#               accountId = event["CodePipeline.job"]["accountId"]
+#               trainingJob = None
+#               try:
+#                   response = codepipeline.get_pipeline_state( name=pipeline_name )
+#                   executionId = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
+                  
+#                   print('Start training job for jobid[%s] executionId[%s]' % (jobId, executionId))
+                  
+#                   for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
+#                       if inputArtifacts['name'] == 'ModelSourceOutput':
+#                           s3Location = inputArtifacts['location']['s3Location']
+#                           zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
+#                           with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
+#                               trainingJob = json.loads(z.read('trainingjob.json').decode('ascii'))
+                  
+#                   params_deploy = {
+#                       "Parameters": {
+#                           "ImageRepoName": "${ImageRepoName}",
+#                           "ImageTagName": "${ImageTagName}",
+#                           "ModelName": "${ModelName}",
+#                           "TrainJobId": executionId
+#                       }
+#                   }
+#                   for outputArtifacts in event["CodePipeline.job"]["data"]["outputArtifacts"]:
+#                       if outputArtifacts['name'] == 'ModelTrainOutput':
+#                           s3Location = outputArtifacts['location']['s3Location']
+                          
+#                           zip_bytes = io.BytesIO()
+#                           with zipfile.ZipFile(zip_bytes, "w") as z:
+#                               z.writestr('assets/deploy-model.json', json.dumps(params_deploy))
+                            
+#                           zip_bytes.seek(0)
+#                           s3.put_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'], Body=zip_bytes.read())
+              
+#                   if trainingJob is None:
+#                       raise(Exception("trainingjob.json wasn't found"))
+                  
+#                   # launch training job
+#                   trainingJob['TrainingJobName'] = 'mlops-${ModelName}-%s' % executionId
+#                   trainingJob['Tags'].append({'Key': 'jobid', 'Value': jobId})
+#                   print(trainingJob)
+#                   sagemaker.create_training_job(**trainingJob)
+                  
+#                   # enable monitoring event
+#                   cloudwatch_events.enable_rule( Name='mlops-job-monitor-${ModelName}')
+#                   # and update codepipeline
+#                   codepipeline.put_job_success_result(jobId=jobId)
+#               except Exception as e:
+#                   print(e)
+#                   resp = codepipeline.put_job_failure_result(
+#                       jobId=jobId,
+#                       failureDetails={
+#                           'type': 'ConfigurationError',
+#                           'message': str(e),
+#                           'externalExecutionId': context.aws_request_id
+#                       }
+#                   )
+#               return 'Done'
+#       Description: "Function that will start a new Sagemaker Training Job"
+#       Tags:
+#         - Key: Name
+#           Value: !Sub mlops-launch-job-${ModelName}
+    
+  MLOpsJobMonitor:
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      FunctionName: !Sub mlops-job-monitor-${ModelName}
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+      Runtime: python3.6
+      Timeout: 60
+      Code: 
+        ZipFile: !Sub |
+          # TODO: Update this to query the status of the SFN (which will complete when training is done)
+
+          import boto3
+          sagemaker = boto3.client('sagemaker')
+          cloudwatch_events = boto3.client('events')
+          codepipeline = boto3.client('codepipeline')
+          def lambda_handler(event, context):
+            pipeline_name = '${AWS::StackName}'
+            result = None
+            token = None
+            try:
+              response = codepipeline.get_pipeline_state( name=pipeline_name )
+              executionId = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
+              
+              # Get the approve train status token
+              for stageState in response['stageStates']:
+                if stageState['stageName'] == 'TrainApproval':
+                  for actionState in stageState['actionStates']:
+                    if actionState['actionName'] == 'ApproveTrain':
+                      latestExecution = actionState['latestExecution']
+                      if latestExecution['status'] != 'InProgress':
+                        raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
+                      token = latestExecution['token']
+              if token is None:
+                raise(Exception("Action token wasn't found. Aborting..."))
+                  
+              response = sagemaker.describe_training_job( 
+                TrainingJobName='mlops-${ModelName}-%s' % executionId )
+              
+              status = response['TrainingJobStatus']
+              print(status)
+              
+              if status == "Completed":
+                result={
+                  'summary': 'Model trained successfully',
+                  'status': 'Approved'
+                }
+              elif status == "InProgress":
+                return "Training (%s) in progress" % executionId
+              else:
+                result={
+                  'summary': response['FailureReason'],
+                  'status': 'Rejected'
+                }
+            except Exception as e:
+              result={
+                'summary': str(e),
+                'status': 'Rejected'
+              }
+            
+            codepipeline.put_approval_result(
+              pipelineName=pipeline_name,
+              stageName='TrainApproval',
+              actionName='ApproveTrain',
+              result=result,
+              token=token
+            )
+            # disable monitoring event
+            cloudwatch_events.disable_rule( Name='mlops-job-monitor-${ModelName}')
+            
+            return "Done"
+      Description: "Function that will start a new Sagemaker Training Job"
+      Tags:
+        - Key: Name
+          Value: !Sub mlops-job-monitor-${ModelName}
+      
+  MLOpsJobMonitorPermissions:
+    Type: "AWS::Lambda::Permission"
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !Sub mlops-job-monitor-${ModelName}
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt JobMonitoringEvent.Arn
+    DependsOn: MLOpsJobMonitor
+
+  JobMonitoringEvent:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: "Event that will monitor the training job and inform codepipeline as it finishes"
+      Name: !Sub mlops-job-monitor-${ModelName}
+      ScheduleExpression: cron(0/1 * * * ? *)
+      State: DISABLED
+      Targets:
+        - Arn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:mlops-job-monitor-${ModelName}
+          Id: !Sub mlops-event-${ModelName}
+    DependsOn: MLOpsJobMonitor
+  
+  DeployPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+      ArtifactStore:
+          Type: S3
+          Location: !Sub mlops-${AWS::Region}-${AWS::AccountId}
+      Stages:
+        -
+          Name: Source
+          Actions: 
+            - 
+              Name: SourceAction
+              ActionTypeId: 
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts: 
+                - 
+                  Name: ModelSourceOutput
+              Configuration: 
+                Owner: !Ref 'GitHubUser'
+                Repo: !Ref 'Repo'
+                Branch: !Ref 'Branch'
+                OAuthToken: !Ref 'GitHubToken'
+              RunOrder: 1
+        -
+          Name: Train
+          Actions:
+            -
+              Name: TrainModel
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              OutputArtifacts:
+                -
+                  Name: ModelTrainOutput
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: 
+                    !Ref MLOpsLaunchJob
+              RunOrder: 1
+        -
+          Name: TrainApproval
+          Actions:
+            -
+              Name: ApproveTrain
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                  CustomData: 'Was this model trained successfully?'
+              RunOrder: 1
+        -
+          Name: DeployDev
+          Actions:
+            - 
+              Name: DeployModelDev
+              InputArtifacts:
+                - Name: ModelSourceOutput
+                - Name: ModelTrainOutput
+              OutputArtifacts:
+                - Name: ModelDeployDevOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub ${AWS::StackName}-deploy-dev
+                TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
+                TemplatePath: ModelSourceOutput::assets/deploy-model-dev.yml
+              RunOrder: 1
+        -
+          Name: DeployApproval
+          Actions:
+            -
+              Name: ApproveDeploy
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                  CustomData: 'Shall this model be put into production?'
+              RunOrder: 1
+        -
+          Name: DeployPrd
+          Actions:
+            - 
+              Name: DeployModelPrd
+              InputArtifacts:
+                - Name: ModelSourceOutput
+                - Name: ModelTrainOutput
+              OutputArtifacts:
+                - Name: ModelDeployPrdOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+                
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                RoleArn: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub ${AWS::StackName}-deploy-prd
+                TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
+                TemplatePath: ModelSourceOutput::assets/deploy-model-prd.yml
+              RunOrder: 1
+    DependsOn:
+      MLOpsLaunchJob
+
+  SagemakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub sagemaker-role-${ModelName}
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [sagemaker.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+                Effect: Allow
+                Resource: arn:aws:s3:::*
+
+  WorkflowExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub stepfunctions-role-${ModelName}
+      AssumeRolePolicyDocument:
+      Statement:
+      - Action: ['sts:AssumeRole']
+        Effect: Allow
+        Principal:
+        Service: [states.amazonaws.com]
+      Version: '2012-10-17'
+      Path: /
+      # ManagedPolicyArns:
+      # - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+    Policies:
+      - PolicyName: SageMakerAccess
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Action:
+            - sagemaker:*
+            - lambda:InvokeFunction
+            Resource: "*"
+            Effect: Allow
+          - Condition:
+            StringEquals:
+              iam:PassedToService: sagemaker.amazonaws.com
+            Action:
+            - iam:PassRole
+            Resource: "*"
+            Effect: Allow
+          - Action:
+            - events:PutTargets
+            - events:PutRule
+            - events:DescribeRule
+            Resource:
+            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
+            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForECSTaskRule
+            - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
+            Effect: Allow
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub codebuild-role-${ModelName}
+      AssumeRolePolicyDocument:
+      Statement:
+      - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+          Service: [codebuild.amazonaws.com]
+      Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: UploadAccess
+          PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Action:
+            - codepipeline:*
+            - sagemaker:*
+            - s3:*
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Effect: Allow
+            Resource: '*'
+            - Action:
+            - iam:PassRole
+            Effect: Allow
+            Resource: !GetAtt SagemakerExecutionRole.Arn
+  
+    
