@@ -23,6 +23,14 @@ sagemaker_execution_role = sys.argv[3]
 workflow_execution_role = sys.argv[4]
 exp_name = sys.argv[5]
 trial_name = sys.argv[6]
+pipeline_name = sys.argv[7]
+
+# Get pipeline execution id as job_name
+
+codepipeline = boto3.client('codepipeline')
+response = codepipeline.get_pipeline_state( name=pipeline_name )
+job_name = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
+print('pipeline execution id: {}'.format(job_name))
 
 # Create Experiment and Trial
 
@@ -64,7 +72,6 @@ input_validation_path = "s3://{}/{}/data/val".format(bucket_name, prefix)
 model_output_path =  "s3://{}/{}/model".format(bucket_name, prefix)
 debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
 model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
-job_name = uuid.uuid1().hex
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
 
@@ -200,7 +207,7 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export JOB_NAME={0}\nexport STEPFUNCTION_ARN={1}'.format(job_name, stepfunction_arn))
+    f.write('export STEPFUNCTION_ARN={}'.format(stepfunction_arn))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))
