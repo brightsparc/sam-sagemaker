@@ -1,5 +1,6 @@
 import boto3
 from botocore.exceptions import ClientError
+import os
 import time
 import sys
 
@@ -187,7 +188,10 @@ print('Workflow exectuted: {}'.format(stepfunction_arn))
 
 # Export environment variables
 
-with open( 'cloud_formation/training.vars', 'w' ) as f:
+if not os.path.exists('cloud_formation'):
+    os.makedirs('cloud_formation')
+
+with open('cloud_formation/training.vars', 'w' ) as f:
     f.write('export JOB_NAME={0}\nexport STEPFUNCTION_ARN={1}'.format(job_name, stepfunction_arn))
 
 end = time.time()
