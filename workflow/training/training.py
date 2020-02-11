@@ -1,5 +1,3 @@
-## TODO: 
-
 import boto3
 from botocore.exceptions import ClientError
 import time
@@ -68,7 +66,7 @@ job_name = "{}-{}".format(exp_name, trial_name)
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
 
-debug_hooks = DebuggerHookConfig(
+debug_hook_config = DebuggerHookConfig(
     s3_output_path=debug_output_path,
     hook_parameters={
         "save_interval": "1"
@@ -114,7 +112,7 @@ xgb = XGBoost(
     framework_version="0.90-2",
     py_version="py3",
     role=sagemaker_execution_role,
-    debugger_hook_config=debug_rules,
+    debugger_hook_config=debug_hook_config,
     rules=debug_rules
 )
 

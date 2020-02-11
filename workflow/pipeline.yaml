@@ -63,7 +63,7 @@ Resources:
             build:
               commands:
                 - echo "Running training.py"
-                - python workflow/training/training.py ${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION
+                - python workflow/training/training.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION
                 - echo "Running suggest_baseline.py"
                 - python workflow/training/suggest_baseline.py ${DataBucket}" "${BucketPrefix}" 
             post_build:
