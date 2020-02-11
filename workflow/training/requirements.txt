@@ -1,2 +1,3 @@
 boto3
 sagemaker
+git+https://github.com/aws/aws-step-functions-data-science-sdk-python

@@ -25,15 +25,16 @@ Parameters:
     Type: String
     Description: Name of the model
   ModelName:
+    Default: v1
     Type: String
     Description: Name of the model
 
 Resources:  
-  MLOpsLaunchJob:
+  TrainModelProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub mlops-job-train-${ModelName} # Use: ${AWS::StackName}-job-train
-      Description: Create a cloud formation workflow to execute in next STEPFUNCTION_ARN
+      Name: !Sub ${AWS::StackName}-job-train
+      Description: Trains machine learning model using SageMaker
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
         Type: CODEPIPELINE
@@ -54,8 +55,7 @@ Resources:
                 python: 3.7
               commands:
                 - echo "Installing requirements and aws datascience sdk form source"
-                - pip install -r workflow/training/requirements
-                - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
+                - pip install -r workflow/training/requirements.txt
             pre_build:
               commands:
                 - echo "Running data_prep.py"
@@ -78,10 +78,10 @@ Resources:
   MLOpsJobMonitor:
     Type: "AWS::Lambda::Function"
     Properties: 
-      FunctionName: !Sub mlops-job-monitor-${ModelName}
+      FunctionName: !Sub ${AWS::StackName}-job-monitor
       Handler: index.lambda_handler
       MemorySize: 512
-      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/MLOps
+      Role: !GetAtt LambdaRole.Arn
       Runtime: python3.6
       Timeout: 60
       Code: 
@@ -142,19 +142,16 @@ Resources:
               token=token
             )
             # disable monitoring event
-            cloudwatch_events.disable_rule( Name='mlops-job-monitor-${ModelName}')
+            cloudwatch_events.disable_rule( Name='${AWS::StackName}-job-monitor')
             
             return "Done"
       Description: "Function that will start a new Sagemaker Training Job"
-      Tags:
-        - Key: Name
-          Value: !Sub mlops-job-monitor-${ModelName}
       
   MLOpsJobMonitorPermissions:
     Type: "AWS::Lambda::Permission"
     Properties: 
       Action: lambda:InvokeFunction
-      FunctionName: !Sub mlops-job-monitor-${ModelName}
+      FunctionName: !Sub ${AWS::StackName}-job-monitor
       Principal: events.amazonaws.com
       SourceArn: !GetAtt JobMonitoringEvent.Arn
     DependsOn: MLOpsJobMonitor
@@ -163,11 +160,11 @@ Resources:
     Type: "AWS::Events::Rule"
     Properties: 
       Description: "Event that will monitor the training job and inform codepipeline as it finishes"
-      Name: !Sub mlops-job-monitor-${ModelName}
+      Name: !Sub ${AWS::StackName}-job-monitor
       ScheduleExpression: cron(0/1 * * * ? *)
       State: DISABLED
       Targets:
-        - Arn: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:mlops-job-monitor-${ModelName}
+        - Arn: !GetAtt MLOpsJobMonitor.Arn
           Id: !Sub mlops-event-${ModelName}
     DependsOn: MLOpsJobMonitor
   
@@ -175,7 +172,7 @@ Resources:
     Type: "AWS::CodePipeline::Pipeline"
     Properties:
       Name: !Sub ${AWS::StackName}
-      RoleArn: !GetAtt MLOpsRole.Arn
+      RoleArn: !GetAtt PipelineRole.Arn
       ArtifactStore:
           Type: S3
           Location: !Sub mlops-${AWS::Region}-${AWS::AccountId}
@@ -191,8 +188,7 @@ Resources:
                 Version: 1
                 Provider: GitHub
               OutputArtifacts: 
-                - 
-                  Name: ModelSourceOutput
+                - Name: ModelSourceOutput
               Configuration: 
                 Owner: !Ref 'GitHubUser'
                 Repo: !Ref 'Repo'
@@ -207,18 +203,15 @@ Resources:
               InputArtifacts:
                 - Name: ModelSourceOutput
               OutputArtifacts:
-                -
-                  Name: ModelTrainOutput
+                - Name: ModelTrainOutput
               ActionTypeId:
-                Category: Invoke
+                Category: Build
                 Owner: AWS
                 Version: 1
                 Provider: CodeBuild
               Configuration:
-                ProjectName: 
-                  !Ref MLOpsLaunchJob
+                ProjectName: !Ref TrainModelProject
               RunOrder: 1
-            # TODO: Add suggest baseline
         -
           Name: TrainApproval
           Actions:
@@ -249,7 +242,7 @@ Resources:
                 Provider: CloudFormation
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt CFNRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM
                 StackName: !Sub ${AWS::StackName}-deploy-dev
                 TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
@@ -286,14 +279,14 @@ Resources:
                 
               Configuration:
                 ActionMode: CREATE_UPDATE
-                RoleArn: !GetAtt MLOpsRole.Arn
+                RoleArn: !GetAtt CFNRole.Arn
                 Capabilities: CAPABILITY_NAMED_IAM
                 StackName: !Sub ${AWS::StackName}-deploy-prd
                 TemplateConfiguration: ModelTrainOutput::assets/deploy-model.json
                 TemplatePath: ModelSourceOutput::assets/deploy-model-prd.yml
               RunOrder: 1
-    DependsOn:
-      MLOpsLaunchJob
+    # DependsOn:
+    #   TrainModelProject
 
   SagemakerExecutionRole:
     Type: AWS::IAM::Role
@@ -365,20 +358,12 @@ Resources:
                 - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
                 Effect: Allow
 
-  MLOpsRole:
+  LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${AWS::StackName}-cfn-role
+      RoleName: !Sub ${AWS::StackName}-mlops-role
       AssumeRolePolicyDocument:
         Statement:
-        - Action: ['sts:AssumeRole']
-          Effect: Allow
-          Principal:
-            Service: [cloudformation.amazonaws.com]
-        - Action: ['sts:AssumeRole']
-          Effect: Allow
-          Principal:
-            Service: [codepipeline.amazonaws.com]
         - Action: ['sts:AssumeRole']
           Effect: Allow
           Principal:
@@ -400,6 +385,68 @@ Resources:
                 Effect: Allow
                 Resource: '*'
 
+  CFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-cfn-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - sagemaker:*
+                  - iam:PassRole
+                  - s3:*
+                  - application-autoscaling:*
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DeleteAlarms
+                Effect: Allow
+                Resource: '*'
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-pipeline-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - s3:*
+                - codebuild:*
+                - cloudformation:CreateStack
+                - cloudformation:DescribeStacks
+                - cloudformation:DeleteStack
+                - cloudformation:UpdateStack
+                - cloudformation:CreateChangeSet
+                - cloudformation:ExecuteChangeSet
+                - cloudformation:DeleteChangeSet
+                - cloudformation:DescribeChangeSet
+                - cloudformation:SetStackPolicy
+                - iam:PassRole
+                - sns:Publish
+                Effect: Allow
+                Resource: '*'
+
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
@@ -410,7 +457,7 @@ Resources:
             Effect: Allow
             Principal:
               Service: [codebuild.amazonaws.com]
-      Version: '2012-10-17'
+        Version: '2012-10-17'
       Path: /
       Policies:
         - PolicyName: UploadAccess
