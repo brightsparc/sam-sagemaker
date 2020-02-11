@@ -3,6 +3,7 @@ from botocore.exceptions import ClientError
 import os
 import time
 import sys
+import uuid
 
 # Import Sagemaker and debugger config
 import sagemaker
@@ -59,11 +60,11 @@ except ClientError as e:
 # Create Estimator with debug hooks
 
 input_train_path = "s3://{}/{}/data/train".format(bucket_name, prefix)
-input_validation_path = "s3://{}/{}/data/validation".format(bucket_name, prefix)
+input_validation_path = "s3://{}/{}/data/val".format(bucket_name, prefix)
 model_output_path =  "s3://{}/{}/model".format(bucket_name, prefix)
 debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
 model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
-job_name = "{}-{}".format(exp_name, trial_name)
+job_name = uuid.uuid1().hex
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
 
@@ -164,7 +165,7 @@ workflow_definition = steps.Chain([
 ])
 
 workflow = Workflow(
-    name=job_name,
+    name=exp_name,
     definition=workflow_definition,
     role=workflow_execution_role,
     execution_input=execution_input

@@ -56,6 +56,7 @@ Resources:
               commands:
                 - echo "Installing requirements and aws datascience sdk form source"
                 - pip install -r workflow/training/requirements.txt
+                - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
             pre_build:
               commands:
                 - echo "Running data_prep.py"
