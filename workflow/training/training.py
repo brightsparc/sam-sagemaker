@@ -112,7 +112,6 @@ hyperparameters = {
 }
 
 xgb = XGBoost(
-    base_job_name=job_name,
     entry_point=entry_point,
     source_dir=source_dir,
     output_path=model_output_path,
@@ -129,7 +128,7 @@ xgb = XGBoost(
 
 # Upload model code to s3
 
-xgb.prepare_workflow_for_training()
+xgb.prepare_workflow_for_training(job_name)
 print('uploaded code to: {}'.format(xgb.uploaded_code.s3_prefix))
 
 # Create Workflow steps
