@@ -50,9 +50,9 @@ def lambda_handler(event, context):
             ContentType=content_type,
             Accept='application/json'
         )
-        predictions = response['Body'].read().decode('utf-8')
+        predictions = round(float(response['Body'].read().decode('utf-8')))
         print('predictions', predictions)
-        if round(float(predictions))!=9:
+        if predictions > 8 and predictions <= 12:
             error_message = "Expected predicions to ~= 9"
     except ClientError as e:
         error_message = e.response['Error']['Message']

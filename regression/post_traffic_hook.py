@@ -32,8 +32,9 @@ def lambda_handler(event, context):
     current_version = os.environ['CURRENT_VERSION']
     endpoint_name = os.environ['ENDPOINT_NAME']
     variant_name = os.environ['VARIANT_NAME']
-    print('version: {} endpoint: {}/{} event: {}'.format(
-        current_version, endpoint_name, variant_name, json.dumps(event)))
+    instance_count = int(os.environ['INSTANCE_COUNT'])
+    print('version: {} endpoint: {}/{} instance count: {} event: {}'.format(
+        current_version, endpoint_name, variant_name, instance_count, json.dumps(event)))
 
     # Get boto3 sagemaker client and endpoint
     sm = boto3.client('sagemaker')
@@ -45,6 +46,13 @@ def lambda_handler(event, context):
         print('describe_endpoint', response)
         if response['EndpointStatus'] != "InService":
             error_message = "Unable to update endpoint not InService"
+        elif instance_count == 0:
+            # Delete the endpoint and config
+            endpoint_config_name = response['EndpointConfigName']
+            response = sm.delete_endpoint(EndpointName=endpoint_name)
+            print('delete_endpoint', response)
+            response = sm.delete_endpoint_config(EndpointConfigName=endpoint_config_name)
+            print('delete_endpoint_config', response)
         else:
             # Return to the minimum instance count
             response = sm.update_endpoint_weights_and_capacities(
