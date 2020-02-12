@@ -23,7 +23,7 @@ prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
 workflow_execution_role = sys.argv[4]
 exp_name = sys.argv[5]
-trial_name = sys.argv[6]
+trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
 pipeline_name = sys.argv[7]
 
 start = time.time()
