@@ -204,7 +204,8 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(endpoint_name, stepfunction_arn))
+    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
+        job_name, endpoint_name, stepfunction_arn))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))

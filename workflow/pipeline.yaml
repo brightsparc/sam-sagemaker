@@ -33,7 +33,7 @@ Resources:
   TrainModelProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${AWS::StackName}-job-train
+      Name: !Sub ${AWS::StackName}-mlops-train
       Description: Trains machine learning model using SageMaker
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
@@ -46,8 +46,9 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Sub |
           version: 0.2
-          env:
             exported-variables:
+              - TRAINING_JOB_NAME
+              - ENDPOINT_NAME
               - STEPFUNCTION_ARN          
           phases:
             install:
@@ -75,11 +76,89 @@ Resources:
             files:
               - '**/*'
       TimeoutInMinutes: 30
+
+  SuggestBaselineProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-mlops-suggestbaseline
+      Description: Suggest a monitor baseline using using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          env:
+            exported-variables:
+              - PROCESSING_JOB_NAME
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo "Installing sagemaker and pandas"
+                - pip install -r workflow/monitor/requirements.txt
+            pre_build:
+              commands:
+                - echo "Running baseline_data_prep.py"
+                - python workflow/monitor/baseline_data_prep.py "${DataBucket}" "${BucketPrefix}"
+            build:
+              commands:
+                - echo "Running suggest_baseline.py"
+                - python workflow/monitor/suggest_baseline.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" 
+            post_build:
+              commands:
+                - echo "Exporting env vars"
+                - source cloud_formation/monitor_baseline.vars
+          artifacts:
+            files:
+              - '**/*'
+      TimeoutInMinutes: 30 
+
+  MonitorScheduleProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-mlops-monitorschedule
+      Description: Suggest a monitor baseline using using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                python: 3.7
+              commands:
+                - echo "Installing sagemaker and pandas"
+                - pip3 install sagemaker pandas
+            build:
+              commands:
+                - echo "Running create_schedule.py"
+                - python3 workflow/monitor/create_schedule.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" 
+            post_build:
+              commands:
+                - echo "Complete"
+          artifacts:
+            files:
+              - '**/*'
+      TimeoutInMinutes: 30    
     
   MLOpsJobMonitor:
     Type: "AWS::Lambda::Function"
     Properties: 
-      FunctionName: !Sub ${AWS::StackName}-job-monitor
+      FunctionName: !Sub ${AWS::StackName}-mlops-monitor
       Handler: index.lambda_handler
       MemorySize: 512
       Role: !GetAtt LambdaRole.Arn
@@ -143,7 +222,7 @@ Resources:
               token=token
             )
             # disable monitoring event
-            cloudwatch_events.disable_rule( Name='${AWS::StackName}-job-monitor')
+            cloudwatch_events.disable_rule( Name='${AWS::StackName}-mlops-monitor')
             
             return "Done"
       Description: "Function that will start a new Sagemaker Training Job"
@@ -152,7 +231,7 @@ Resources:
     Type: "AWS::Lambda::Permission"
     Properties: 
       Action: lambda:InvokeFunction
-      FunctionName: !Sub ${AWS::StackName}-job-monitor
+      FunctionName: !Sub ${AWS::StackName}-mlops-monitor
       Principal: events.amazonaws.com
       SourceArn: !GetAtt JobMonitoringEvent.Arn
     DependsOn: MLOpsJobMonitor
@@ -161,7 +240,7 @@ Resources:
     Type: "AWS::Events::Rule"
     Properties: 
       Description: "Event that will monitor the training job and inform codepipeline as it finishes"
-      Name: !Sub ${AWS::StackName}-job-monitor
+      Name: !Sub ${AWS::StackName}-mlops-monitor
       ScheduleExpression: cron(0/1 * * * ? *)
       State: DISABLED
       Targets:
@@ -176,7 +255,7 @@ Resources:
       RoleArn: !GetAtt PipelineRole.Arn
       ArtifactStore:
           Type: S3
-          Location: !Sub mlops-${AWS::Region}-${AWS::AccountId}
+          Location: !Ref MLOpsBucket
       Stages:
         -
           Name: Source
@@ -201,6 +280,7 @@ Resources:
           Actions:
             -
               Name: TrainModel
+              Namespace: TrainingVariables   
               InputArtifacts:
                 - Name: ModelSourceOutput
               OutputArtifacts:
@@ -212,6 +292,22 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
+              RunOrder: 1
+            -
+              Name: SuggestBaseline
+              Namespace: TrainingVariables
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              OutputArtifacts:
+                - Name: ModelTrainOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SuggestBaselineProject
+                EnvironmentVariables: '[{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: TrainApproval
@@ -289,6 +385,14 @@ Resources:
     # DependsOn:
     #   TrainModelProject
 
+  MLOpsBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Sub ${AWS::StackName}-${AWS::AccountId}-${AWS::Region}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+            
   SagemakerExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -415,7 +519,7 @@ Resources:
   PipelineRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${AWS::StackName}-pipeline-role
+      RoleName: !Sub ${AWS::StackName}-mlops-role
       AssumeRolePolicyDocument:
         Statement:
         - Action: ['sts:AssumeRole']
