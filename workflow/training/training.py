@@ -181,10 +181,14 @@ workflow_definition = steps.Chain([
 
 workflow = Workflow.attach(workflow_arn)
 workflow.update(definition=workflow_definition)
+print('Workflow updated: {}'.format(workflow_arn))
+
+# Sleep for 5 seconds then execute after this is applied
+time.sleep(5)
+
 execution = workflow.execute(
     inputs={ 'EndpointName': exp_name }
 )
-
 stepfunction_arn = execution.execution_arn
 print('Workflow exectuted: {}'.format(stepfunction_arn))
 

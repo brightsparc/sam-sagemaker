@@ -537,5 +537,8 @@ Resources:
                 Resource: 
                   - !GetAtt SagemakerExecutionRole.Arn
                   - !GetAtt WorkflowExecutionRole.Arn
-  
     
+Outputs:
+  WorkflowPipeline:
+    Description: The workflow code pipeline
+    Value: !Ref WorkflowPipeline
