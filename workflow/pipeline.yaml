@@ -128,7 +128,8 @@ Resources:
                         raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
                       token = latestExecution['token']
               if token is None:
-                raise(Exception("Action token wasn't found. Aborting..."))
+                print('No token found for pipeline execution: {}'.format(executionId))
+                return "Action token wasn't found. Aborting..."
               
               # Check the status of the step function workflow and if succeeded approve the step
               # see: https://docs.aws.amazon.com/step-functions/latest/dg/cw-events.html#cw-events-events
@@ -160,7 +161,7 @@ Resources:
             )
             
             return "Done"
-      Description: "Function that will start a new Sagemaker Training Job"
+      Description: "Function called when a step function workflow is complete"
       
   MLOpsJobMonitorPermissions:
     Type: "AWS::Lambda::Permission"
