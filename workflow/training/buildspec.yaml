@@ -1,30 +1,32 @@
 version: 0.2
-exported-variables:
-	- TRAINING_JOB_NAME
-	- ENDPOINT_NAME
-	- STEPFUNCTION_ARN          
+
+env:
+  exported-variables:
+    - PROCESSING_JOB_NAME
+
 phases:
-install:
-	runtime-versions:
-	python: 3.7
-	commands:
-	- echo "Installing requirements and aws datascience sdk form source"
-	- pip install -r workflow/training/requirements.txt
-	- pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
-pre_build:
-	commands:
-	- echo "Running data_prep.py"
-	- python workflow/training/data_prep.py $BUCKET $PREFIX
-build:
-	commands:
-	- echo "Running training.py"
-	- python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_EXECUTION_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
-	- echo "Running suggest_baseline.py"
-	- python workflow/training/suggest_baseline.py $BUCKET $PREFIX
-post_build:
-	commands:
-	- echo "Exporting env vars"
-	- source cloud_formation/training.vars
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - echo "Installing requirements and aws datascience sdk form source"
+      - pip install -r workflow/training/requirements.txt
+      - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
+  pre_build:
+    commands:
+      - echo "Running data_prep.py"
+      - python workflow/training/data_prep.py $BUCKET $PREFIX
+  build:
+    commands:
+      - echo "Running training.py"
+      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_EXECUTION_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
+      - echo "Running suggest_baseline.py"
+      - python workflow/training/suggest_baseline.py $BUCKET $PREFIX
+  post_build:
+    commands:
+      - echo "Exporting env vars"
+      - source cloud_formation/training.vars
+  
 artifacts:
-files:
-	- '**/*'
+  files:
+    - '**/*'

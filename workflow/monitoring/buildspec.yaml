@@ -1,7 +1,9 @@
 version: 0.2
+
 env:
   exported-variables:
     - PROCESSING_JOB_NAME
+
 phases:
   install:
     runtime-versions:
@@ -21,6 +23,7 @@ phases:
     commands:
       - echo "Exporting env vars"
       - source cloud_formation/suggest_baseline.vars
+
 artifacts:
   files:
     - '**/*'
