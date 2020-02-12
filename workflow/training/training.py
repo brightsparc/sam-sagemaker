@@ -7,6 +7,7 @@ import uuid
 
 # Import Sagemaker and debugger config
 import sagemaker
+from sagemaker.utils import name_from_base
 from sagemaker.xgboost import XGBoost
 from sagemaker.debugger import Rule, rule_configs, DebuggerHookConfig, CollectionConfig
 
@@ -25,16 +26,17 @@ exp_name = sys.argv[5]
 trial_name = sys.argv[6]
 pipeline_name = sys.argv[7]
 
+start = time.time()
+
 # Get pipeline execution id as job_name
 
 codepipeline = boto3.client('codepipeline')
 response = codepipeline.get_pipeline_state( name=pipeline_name )
-job_name = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
-print('pipeline execution id: {}'.format(job_name))
+execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
+print('Staring Pipeline execution id: {}'.format(execution_id))
 
 # Create Experiment and Trial
 
-start = time.time()
 print('Creating experiment: {} and trial: {}'.format(exp_name, trial_name))
 
 sm = boto3.client('sagemaker')
@@ -74,6 +76,8 @@ debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
 model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
+endpoint_name = '{}-{}'.format(exp_name, trial_name)
+job_name = name_from_base(execution_id)
 
 # TODO: Upload source files here given we are not calling fit
 
@@ -134,9 +138,6 @@ print('uploaded code to: {}'.format(xgb.uploaded_code.s3_prefix))
 # Create Workflow steps
 
 execution_input = ExecutionInput(schema={
-    'ExecutionRoleArn': str,
-    'JobName': str, 
-    'ModelName': str,
     'EndpointName': str
 })
 
@@ -147,19 +148,19 @@ training_step = steps.TrainingStep(
         'train': sagemaker.s3_input(input_train_path, content_type='libsvm'),
         'validation': sagemaker.s3_input(input_validation_path, content_type='libsvm')
     },
-    job_name=execution_input['JobName']  
+    job_name=job_name
 )
 
 model_step = steps.ModelStep(
     'Save model',
     model=training_step.get_expected_model(),
-    model_name=execution_input['ModelName']  
+    model_name=job_name
 )
 
 endpoint_config_step = steps.EndpointConfigStep(
     "Create Endpoint Config",
-    endpoint_config_name=execution_input['ModelName'],
-    model_name=execution_input['ModelName'],
+    endpoint_config_name=job_name,
+    model_name=job_name,
     initial_instance_count=1, 
     instance_type='ml.m5.large'
 )
@@ -167,7 +168,7 @@ endpoint_config_step = steps.EndpointConfigStep(
 endpoint_step = steps.EndpointStep(
     "Create Endpoint",
     endpoint_name=execution_input['EndpointName'],
-    endpoint_config_name=execution_input['ModelName']
+    endpoint_config_name=job_name
 )
 
 workflow_definition = steps.Chain([
@@ -185,10 +186,7 @@ workflow = Workflow(
 )
 
 inputs={
-    'ExecutionRoleArn': sagemaker_execution_role,
-    'JobName': job_name,  
-    'ModelName': job_name,
-    'EndpointName': job_name
+    'EndpointName': endpoint_name
 }
 
 workflow.create()
@@ -206,7 +204,7 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export STEPFUNCTION_ARN={}'.format(stepfunction_arn))
+    f.write('export ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(endpoint_name, stepfunction_arn))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))
