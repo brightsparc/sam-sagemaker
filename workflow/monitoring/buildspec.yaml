@@ -1,0 +1,26 @@
+version: 0.2
+env:
+  exported-variables:
+    - PROCESSING_JOB_NAME
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - echo "Installing sagemaker and pandas"
+      - pip install -r workflow/monitor/requirements.txt
+  pre_build:
+    commands:
+      - echo "Running baseline_data_prep.py"
+      - python workflow/monitoring/baseline_data_prep.py $BUCKET $PREFIX
+  build:
+    commands:
+      - echo "Running suggest_baseline.py"
+      - python workflow/monitoring/suggest_baseline.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $TRAINING_JOB_NAME
+  post_build:
+    commands:
+      - echo "Exporting env vars"
+      - source cloud_formation/suggest_baseline.vars
+artifacts:
+  files:
+    - '**/*'

@@ -44,37 +44,7 @@ Resources:
         Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Sub |
-          version: 0.2
-            exported-variables:
-              - TRAINING_JOB_NAME
-              - ENDPOINT_NAME
-              - STEPFUNCTION_ARN          
-          phases:
-            install:
-              runtime-versions:
-                python: 3.7
-              commands:
-                - echo "Installing requirements and aws datascience sdk form source"
-                - pip install -r workflow/training/requirements.txt
-                - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
-            pre_build:
-              commands:
-                - echo "Running data_prep.py"
-                - python workflow/training/data_prep.py "${DataBucket}" "${BucketPrefix}"
-            build:
-              commands:
-                - echo "Running training.py"
-                - python workflow/training/training.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" "${WorkflowExecutionRole.Arn}" "${ModelName}" $CODEBUILD_RESOLVED_SOURCE_VERSION "${AWS::StackName}"
-                - echo "Running suggest_baseline.py"
-                - python workflow/training/suggest_baseline.py "${DataBucket}" "${BucketPrefix}" 
-            post_build:
-              commands:
-                - echo "Exporting env vars"
-                - source cloud_formation/training.vars
-          artifacts:
-            files:
-              - '**/*'
+        BuildSpec: workflow/training/buildspec.yaml
       TimeoutInMinutes: 30
 
   SuggestBaselineProject:
@@ -91,33 +61,7 @@ Resources:
         Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Sub |
-          version: 0.2
-          env:
-            exported-variables:
-              - PROCESSING_JOB_NAME
-          phases:
-            install:
-              runtime-versions:
-                python: 3.7
-              commands:
-                - echo "Installing sagemaker and pandas"
-                - pip install -r workflow/monitor/requirements.txt
-            pre_build:
-              commands:
-                - echo "Running baseline_data_prep.py"
-                - python workflow/monitor/baseline_data_prep.py "${DataBucket}" "${BucketPrefix}"
-            build:
-              commands:
-                - echo "Running suggest_baseline.py"
-                - python workflow/monitor/suggest_baseline.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" 
-            post_build:
-              commands:
-                - echo "Exporting env vars"
-                - source cloud_formation/monitor_baseline.vars
-          artifacts:
-            files:
-              - '**/*'
+        BuildSpec: workflow/monitoring/buildspec.yaml
       TimeoutInMinutes: 30 
 
   MonitorScheduleProject:
@@ -146,7 +90,7 @@ Resources:
             build:
               commands:
                 - echo "Running create_schedule.py"
-                - python3 workflow/monitor/create_schedule.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" 
+                - python3 workflow/monitoring/create_schedule.py "${DataBucket}" "${BucketPrefix}" "${SagemakerExecutionRole.Arn}" 
             post_build:
               commands:
                 - echo "Complete"
@@ -292,14 +236,16 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
+                EnvironmentVariables: '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_EXECUTION_ARN","value":"${WorkflowExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
+        -
+          Name: Monitor
+          Actions:
             -
               Name: SuggestBaseline
-              Namespace: TrainingVariables
+              Namespace: MonitoringVariables
               InputArtifacts:
                 - Name: ModelSourceOutput
-              OutputArtifacts:
-                - Name: ModelTrainOutput
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -307,7 +253,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: '[{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: TrainApproval
@@ -464,7 +410,7 @@ Resources:
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${AWS::StackName}-mlops-role
+      RoleName: !Sub ${AWS::StackName}-lambda-role
       AssumeRolePolicyDocument:
         Statement:
         - Action: ['sts:AssumeRole']
@@ -519,7 +465,7 @@ Resources:
   PipelineRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${AWS::StackName}-mlops-role
+      RoleName: !Sub ${AWS::StackName}-pipeline-role
       AssumeRolePolicyDocument:
         Statement:
         - Action: ['sts:AssumeRole']

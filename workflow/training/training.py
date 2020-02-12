@@ -22,16 +22,15 @@ bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
 workflow_execution_role = sys.argv[4]
-exp_name = sys.argv[5]
+exp_name = sys.argv[5] # Exp name is stack name for now
 trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
-pipeline_name = sys.argv[7]
 
 start = time.time()
 
 # Get pipeline execution id as job_name
 
 codepipeline = boto3.client('codepipeline')
-response = codepipeline.get_pipeline_state( name=pipeline_name )
+response = codepipeline.get_pipeline_state( name=exp_name )
 execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
 print('Staring Pipeline execution id: {}'.format(execution_id))
 
