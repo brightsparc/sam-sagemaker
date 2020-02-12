@@ -253,7 +253,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: TrainApproval
