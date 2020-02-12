@@ -22,15 +22,16 @@ bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
 workflow_execution_role = sys.argv[4]
-exp_name = sys.argv[5] # Exp name is stack name for now
-trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
+exp_name = sys.argv[5] 
+stack_name = sys.argv[6] 
+trial_name = sys.argv[7][:7] # Take the first 8 characters of commit hash
 
 start = time.time()
 
 # Get pipeline execution id as job_name
 
 codepipeline = boto3.client('codepipeline')
-response = codepipeline.get_pipeline_state( name=exp_name )
+response = codepipeline.get_pipeline_state( name=stack_name )
 execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
 print('Staring Pipeline execution id: {}'.format(execution_id))
 
@@ -75,7 +76,6 @@ debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
 model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
-endpoint_name = '{}-{}'.format(exp_name, trial_name)
 job_name = name_from_base(execution_id)
 
 # TODO: Upload source files here given we are not calling fit
@@ -185,7 +185,7 @@ workflow = Workflow(
 )
 
 inputs={
-    'EndpointName': endpoint_name
+    'EndpointName': exp_name # Create endpoint per experiment
 }
 
 workflow.create()
@@ -203,8 +203,8 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
-        job_name, endpoint_name, stepfunction_arn))
+    f.write('export TRAINING_JOB_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
+        job_name, stepfunction_arn))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))

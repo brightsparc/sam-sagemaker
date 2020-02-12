@@ -25,7 +25,7 @@ Parameters:
     Type: String
     Description: Name of the model
   ModelName:
-    Default: v1
+    Default: mlops1
     Type: String
     Description: Name of the model
 
@@ -236,7 +236,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
-                EnvironmentVariables: '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_EXECUTION_ARN","value":"${WorkflowExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_EXECUTION_ARN","value":"${WorkflowExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"MODEL_NAME","value":"${ModelName}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: Monitor
@@ -253,7 +253,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${DataBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: TrainApproval
@@ -482,15 +482,7 @@ Resources:
               - Action:
                 - s3:*
                 - codebuild:*
-                - cloudformation:CreateStack
-                - cloudformation:DescribeStacks
-                - cloudformation:DeleteStack
-                - cloudformation:UpdateStack
-                - cloudformation:CreateChangeSet
-                - cloudformation:ExecuteChangeSet
-                - cloudformation:DeleteChangeSet
-                - cloudformation:DescribeChangeSet
-                - cloudformation:SetStackPolicy
+                - cloudformation:*
                 - iam:PassRole
                 - sns:Publish
                 Effect: Allow
