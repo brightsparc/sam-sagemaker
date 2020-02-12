@@ -10,7 +10,7 @@ phases:
       python: 3.7
     commands:
       - echo "Installing sagemaker and pandas"
-      - pip install -r workflow/monitor/requirements.txt
+      - pip install -r workflow/monitoring/requirements.txt
   pre_build:
     commands:
       - echo "Running baseline_data_prep.py"
