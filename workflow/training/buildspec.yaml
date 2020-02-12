@@ -20,7 +20,7 @@ phases:
   build:
     commands:
       - echo "Running training.py"
-      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_EXECUTION_ARN $MODEL_NAME $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
+      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $EXPERIMENT_NAME $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
   post_build:
     commands:
       - echo "Exporting env vars"

@@ -21,7 +21,7 @@ from stepfunctions.workflow import Workflow
 bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
-workflow_execution_role = sys.argv[4]
+workflow_arn = sys.argv[4]
 exp_name = sys.argv[5] 
 stack_name = sys.argv[6] 
 trial_name = sys.argv[7][:7] # Take the first 8 characters of commit hash
@@ -177,21 +177,12 @@ workflow_definition = steps.Chain([
     endpoint_step
 ])
 
-workflow = Workflow(
-    name=exp_name,
-    definition=workflow_definition,
-    role=workflow_execution_role,
-    execution_input=execution_input
-)
+# Update the workflow that is already created 
 
-inputs={
-    'EndpointName': exp_name # Create endpoint per experiment
-}
-
-workflow.create()
-workflow.update(definition=workflow.definition)
+workflow = Workflow.attach(workflow_arn)
+workflow.update(definition=workflow_definition)
 execution = workflow.execute(
-    inputs=inputs
+    inputs={ 'EndpointName': exp_name }
 )
 
 stepfunction_arn = execution.execution_arn
