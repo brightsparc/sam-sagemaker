@@ -100,6 +100,7 @@ Resources:
     Properties: 
       FunctionName: !Sub ${AWS::StackName}-mlops-monitor
       Handler: index.lambda_handler
+      Runtime: python3.7
       MemorySize: 512
       Role: !GetAtt LambdaRole.Arn
       Runtime: python3.6
@@ -110,56 +111,50 @@ Resources:
           import json
           codepipeline = boto3.client('codepipeline')
           def lambda_handler(event, context):
-            print('event', json.dumps(event))            
+            print('event', json.dumps(event))
+            # Define stage and action name
+            status = event['detail']['status']
+            if status == 'RUNNING':
+              return "State machine still running"
+            # The pipeline will be the same name step function workflow
             pipeline_name = '${AWS::StackName}'
-            result = None
+            response = codepipeline.get_pipeline_state( name=pipeline_name )
+            print('get_pipeline_state', response)
+            # Get the approve train status token
+            stage_name = 'Train'
+            action_name = 'ApproveTrain'
             token = None
-            try:
-              response = codepipeline.get_pipeline_state( name=pipeline_name )
-              executionId = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
-              
-              # Get the approve train status token
-              for stageState in response['stageStates']:
-                if stageState['stageName'] == 'TrainApproval':
-                  for actionState in stageState['actionStates']:
-                    if actionState['actionName'] == 'ApproveTrain':
-                      latestExecution = actionState['latestExecution']
-                      if latestExecution['status'] != 'InProgress':
-                        raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
-                      token = latestExecution['token']
-              if token is None:
-                print('No token found for pipeline execution: {}'.format(executionId))
-                return "Action token wasn't found. Aborting..."
-              
-              # Check the status of the step function workflow and if succeeded approve the step
-              # see: https://docs.aws.amazon.com/step-functions/latest/dg/cw-events.html#cw-events-events
-              status = event['detail']['status']
-              print(status)
-              
-              if status == "SUCCEEDED":
-                result={
+            for stageState in response['stageStates']:
+              if stageState['stageName'] == stage_name:
+                for actionState in stageState['actionStates']:
+                  if actionState['actionName'] == action_name:
+                    latestExecution = actionState['latestExecution']
+                    if latestExecution['status'] != 'InProgress':
+                      raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
+                    token = latestExecution['token']
+            if token is None:
+              raise(Exception("Action token wasn't found. Aborting..."))
+            # Check status
+            if status == 'SUCCEEDED':
+              result={
                   'summary': 'Model trained successfully',
                   'status': 'Approved'
                 }
-              else:
-                result={
-                  'summary': response['FailureReason'],
-                  'status': 'Rejected'
-                }
-            except Exception as e:
+            else:
               result={
-                'summary': str(e),
-                'status': 'Rejected'
+                'summary': 'Workflow unsuccesful with status: {}'.format(status),
+                'status': 'Rejected',
+                'link': 'https://docs.aws.amazon.com/step-functions/latest/dg/cw-events.html#cw-events-execution-failed'
               }
-            
-            codepipeline.put_approval_result(
+            # Update approval
+            response = codepipeline.put_approval_result(
               pipelineName=pipeline_name,
-              stageName='TrainApproval',
-              actionName='ApproveTrain',
+              stageName=stage_name,
+              actionName=action_name,
               result=result,
               token=token
             )
-            
+            print('put_approval_result', response)
             return "Done"
       Description: "Function called when a step function workflow is complete"
       
@@ -253,6 +248,16 @@ Resources:
                 ProjectName: !Ref TrainModelProject
                 EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${MLOpsBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"EXPERIMENT_NAME","value":"${ExperimentName}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
+            -
+              Name: ApproveTrain
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                  CustomData: 'Was this model trained successfully?'
+              RunOrder: 2
         -
           Name: Monitor
           Actions:
@@ -269,20 +274,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
                 EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${MLOpsBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"TRAINING_JOB_NAME","value":"#{TrainingVariables.TRAINING_JOB_NAME}","type":"PLAINTEXT"}]'
-              RunOrder: 1
-        -
-          Name: TrainApproval
-          Actions:
-            -
-              Name: ApproveTrain
-              ActionTypeId:
-                Category: Approval
-                Owner: AWS
-                Version: 1
-                Provider: Manual
-              Configuration:
-                  CustomData: 'Was this model trained successfully?'
-              RunOrder: 1
+              RunOrder: 1            
         -
           Name: DeployDev
           Actions:
@@ -441,12 +433,8 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Action:
-                  - sagemaker:*
-                  - iam:PassRole
-                  - s3:*
-                  - cloudwatch:PutMetricAlarm
-                  - cloudwatch:DescribeAlarms
-                  - cloudwatch:DeleteAlarms
+                  - codepipeline:GetPipelineState
+                  - codepipeline:PutApprovalResult
                 Effect: Allow
                 Resource: '*'
 
