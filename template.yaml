@@ -9,18 +9,10 @@ Parameters:
     Description: The commit id associated with the endpoint
   EndpointName:
     Type: String
-    Default: regression-c0a6afb44bb111eaabaaebff58b910ef
+    Default: regression-f99cfed04e0a11ea9df4b9cadb69d33b
     Description: The name of the endpoint to switch to
   EndpointVariant:
     Description: Name of the SageMaker variant
-    Default: 'AllTraffic'
-    Type: String
-  CoolDownEndpointName:
-    Type: String
-    Default: regression-fb4528664bd011eaabaaebff58b910ef
-    Description: The name of the endpoint to cool down post deploy
-  CoolDownVariant:
-    Description: Name of the SageMaker variant for cooldown
     Default: 'AllTraffic'
     Type: String
   CoolDownCapacity:
@@ -92,6 +84,7 @@ Resources:
         Variables:
           COMMIT_ID: !Ref CommitId
           ENDPOINT_NAME: !Ref EndpointName
+          VARIANT_NAME: !Ref EndpointVariant
       Events:
         Invoke:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
@@ -108,7 +101,7 @@ Resources:
               - sts:AssumeRole
             Effect: Allow
             Principal:
-              Service:
+              Service: 
                 - lambda.amazonaws.com
         Version: '2012-10-17'
       ManagedPolicyArns:
@@ -136,9 +129,15 @@ Resources:
           Statement:
             - Effect: Allow
               Action:
-                - sagemaker:InvokeEndpoint
+                - lambda:GetFunction
               Resource: 
                 "arn:aws:sagemaker:*:*:endpoint/*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunction
+              Resource: !GetAtt RegressionFunctionRole.Arn
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -150,8 +149,10 @@ Resources:
         Enabled: False
       Environment:
         Variables:
-          CURRENT_VERSION: !GetAtt RegressionFunction.Version.Version
+          FUNCTION_NAME: !Ref RegressionFunction
+          FUNCTION_VERSION: !GetAtt RegressionFunction.Version.Version
           ENDPOINT_NAME: !Ref EndpointName
+          VARIANT_NAME: !Ref EndpointVariant
 
   PostTrafficLambdaFunction:
     Type: AWS::Serverless::Function
@@ -166,11 +167,17 @@ Resources:
             - Effect: "Allow"
               Action:
                 - sagemaker:DeleteEndpoint
-                - sagemaker:DescribeEndpoint
                 - sagemaker:DeleteEndpointConfig
+                - sagemaker:DescribeEndpoint
                 - sagemaker:UpdateEndpointWeightsAndCapacities
               Resource: 
                 "arn:aws:sagemaker:*:*:endpoint/*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:GetFunction
+              Resource: !GetAtt RegressionFunctionRole.Arn
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -182,9 +189,8 @@ Resources:
         Enabled: False
       Environment:
         Variables:
-          CURRENT_VERSION: !GetAtt RegressionFunction.Version.Version
-          ENDPOINT_NAME: !Ref CoolDownEndpointName
-          VARIANT_NAME: !Ref CoolDownVariant
+          FUNCTION_NAME: !Ref RegressionFunction
+          FUNCTION_VERSION: !GetAtt RegressionFunction.Version.Version
           INSTANCE_COUNT: !Ref CoolDownCapacity
 
   AliasErrorMetricGreaterThanZeroAlarm:
