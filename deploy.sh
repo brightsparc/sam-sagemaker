@@ -4,4 +4,4 @@ aws cloudformation package --template-file template.yaml --output-template-file 
 aws cloudformation deploy --template-file packaged.yaml --capabilities CAPABILITY_IAM --stack-name sam-sagemaker --parameter-overrides \
     CommitId=$1 \
     EndpointName=${2:-regression-c0a6afb44bb111eaabaaebff58b910ef} \
-    CoolDownEndpointName=${3:-regression-fb4528664bd011eaabaaebff58b910ef}
+    CoolDownEndpointName=${3:-regression-f99cfed04e0a11ea9df4b9cadb69d33b}

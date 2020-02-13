@@ -9,7 +9,6 @@ Parameters:
     Description: The commit id associated with the endpoint
   EndpointName:
     Type: String
-    Default: regression-c0a6afb44bb111eaabaaebff58b910ef
     Description: The name of the endpoint to switch to
   EndpointVariant:
     Description: Name of the SageMaker variant
@@ -17,22 +16,21 @@ Parameters:
     Type: String
   CoolDownEndpointName:
     Type: String
-    Default: regression-fb4528664bd011eaabaaebff58b910ef
     Description: The name of the endpoint to cool down post deploy
   CoolDownVariant:
     Description: Name of the SageMaker variant for cooldown
     Default: 'AllTraffic'
     Type: String
   CoolDownCapacity:
-    Default: '0'
+    Default: '1'
     Description: Cooldown instance capacity
     Type: Number  
   AutoScalingMinCapacity:
-    Default: '0'
+    Default: '1'
     Description: Minimum number of instances for endpoint
     Type: Number
   AutoScalingMaxCapacity:
-    Default: '3'
+    Default: '1'
     Description: Maximum number of instances for endpoint
     Type: Number
   AutoScalingCoolDownPeriod:
