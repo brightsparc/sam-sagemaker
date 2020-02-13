@@ -74,8 +74,8 @@ def lambda_handler(event, context):
     cd = boto3.client('codedeploy')
 
     try:
-        if error_message:
-            # Write failure if endpoint is 
+        if error_message and not error_message.startswith('Could not find endpoint'):
+            # Write failure if endpoint exists and unable to be updated 
             response = cd.put_lifecycle_event_hook_execution_status(
                 deploymentId=event['DeploymentId'],
                 lifecycleEventHookExecutionId=event['LifecycleEventHookExecutionId'],

@@ -52,8 +52,8 @@ def lambda_handler(event, context):
         )
         predictions = round(float(response['Body'].read().decode('utf-8')))
         print('predictions', predictions)
-        if predictions > 8 and predictions <= 12:
-            error_message = "Expected predicions to ~= 9"
+        if predictions < 8 or predictions > 10:
+            error_message = "expected predicions to ~= 9"
     except ClientError as e:
         error_message = e.response['Error']['Message']
 
@@ -63,6 +63,7 @@ def lambda_handler(event, context):
     # If error return failure condition, else update to success
     try:
         if error_message:
+            print('invoke endpoint error', error_message)
             response = cd.put_lifecycle_event_hook_execution_status(
                 deploymentId=event['DeploymentId'],
                 lifecycleEventHookExecutionId=event['LifecycleEventHookExecutionId'],
@@ -85,6 +86,7 @@ def lambda_handler(event, context):
             }    
     except ClientError as e:
         # Error attempting to update the cloud formation
+        print('code deploy error', e)
         return {
             "statusCode": 500,
             "message": e.response['Error']['Message']            
