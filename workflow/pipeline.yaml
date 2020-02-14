@@ -189,6 +189,39 @@ Resources:
           Id: !Sub ${AWS::StackName}-mlops-event
     DependsOn: MLOpsJobMonitor
   
+  SwitchDeployment:
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      FunctionName: !Sub ${AWS::StackName}-mlops-switch-deployment
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code: 
+        ZipFile: !Sub |
+          import boto3
+          ssm = boto3.client('ssm')
+          def lambda_handler(event, context):
+            deployment_parameter_name='${DeploymentParameter}'
+            # Get current parameter
+            response = client.get_parameter(
+              Name=deployment_parameter_name
+            )
+            print('get_parameter',response )
+            deployment_parameter = response['Parameter']['Value']
+            cooldown_parameter = 'green' if live_parameter == 'blue' else 'blue'
+            # Put cooldown
+            response = client.put_parameter(
+              Name=deployment_parameter_name,
+              Value=cooldown_parameter,
+              Type='String',
+              Overwrite=True,
+            )
+            print('put_parameter', response)
+            return 'Done'
+      Description: "Function that will start a new Sagemaker Training Job"
+
   WorkflowPipeline:
     Type: AWS::StepFunctions::StateMachine
     Properties:
@@ -288,6 +321,20 @@ Resources:
                 OutputFileName: cloud_formation/deploy_output.json
               RunOrder: 1
             -
+              Name: SwitchDeployment
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: 1
+                Provider: Lambda
+              Configuration:
+                  FunctionName:
+                    Ref: SwitchDeployment
+              RunOrder: 2
+        -
+          Name: Monitor
+          Actions:
+            -
               Name: SuggestBaseline
               Namespace: BaselineVariables
               InputArtifacts:
@@ -300,10 +347,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
                 EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
-              RunOrder: 2
-        -
-          Name: Monitor
-          Actions:
+              RunOrder: 1
             -
               Name: CreateSchedule
               InputArtifacts:
@@ -316,7 +360,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref CreateScheduleProject
                 EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}"},{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"}]'
-              RunOrder: 1
+              RunOrder: 2
            
   SagemakerExecutionRole:
     Type: AWS::IAM::Role
@@ -406,6 +450,8 @@ Resources:
               - Action:
                   - codepipeline:GetPipelineState
                   - codepipeline:PutApprovalResult
+                  - ssm:GetParameter
+                  - ssm:PutParameter  
                 Effect: Allow
                 Resource: '*'
 
