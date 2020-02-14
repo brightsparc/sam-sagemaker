@@ -54,12 +54,8 @@ my_default_monitor.suggest_baseline(
 
 # save environment variables
 
-processing_job_name = my_default_monitor.latest_baselining_job_name
-
-print('compare job_name', job_name, processing_job_name)
-
 with open( './cloud_formation/suggest_baseline.vars', 'w' ) as f:
-    f.write("export PROCESSING_JOB_NAME={0}\n".format(processing_job_name))
+    f.write("export PROCESSING_JOB_NAME={0}\n".format(job_name))
 
 end = time.time()
 print('Monitor baseline complete in: {}'.format(end - start))

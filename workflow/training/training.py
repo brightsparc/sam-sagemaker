@@ -169,8 +169,8 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export TRAINING_JOB_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
-        job_name, stepfunction_arn))
+    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\n\nexport STEPFUNCTION_ARN={}'.format(
+        job_name, endpoint_name, stepfunction_arn))
 
 # Write deployment configuration
 

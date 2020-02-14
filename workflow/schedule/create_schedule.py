@@ -12,8 +12,8 @@ from sagemaker.model_monitor import DefaultModelMonitor, BaseliningJob, CronExpr
 bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 execution_role = sys.argv[3]
-processing_job_name = os.environ['PROCESSING_JOB_NAME']
-endpoint_name = os.environ['ENDPOINT_NAME']
+processing_job_name = sys.argv[4] 
+endpoint_name = sys.argv[5] 
 
 # Upload pre-processor scripts
 
@@ -52,8 +52,8 @@ print('Starting monitor schedule for endpoint: {}'.format(endpoint_name))
 # First, copy over some test scripts to the S3 bucket so that they can be used for pre and post processing
 
 s3 = boto3.Session().resource('s3')
-s3.Bucket(bucket_name).Object(code_prefix+"/preprocessor.py").upload_file('Source/Monitor/preprocessor.py')
-s3.Bucket(bucket_name).Object(code_prefix+"/postprocessor.py").upload_file('Source/Monitor/postprocessor.py')
+s3.Bucket(bucket_name).Object(code_prefix+"/preprocessor.py").upload_file('workflow/schedule/preprocessor.py')
+s3.Bucket(bucket_name).Object(code_prefix+"/postprocessor.py").upload_file('workflow/schedule/postprocessor.py')
 
 my_default_monitor.create_monitoring_schedule(
     monitor_schedule_name=processing_job_name,
