@@ -35,9 +35,10 @@ execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionI
 job_name = name_from_base(execution_id)
 print('Staring Training job: {}'.format(job_name))
 
-# TODO: Lookup environment to get blue/green from current lambda
+# TODO: Lookup environment to get live blue/green from current lambda
 
-endpoint_name = name_from_base(stack_name)
+endpoint_name = '{}-{}'.format(stack_name, "blue")
+cooldown_endpoint_name = '{}-{}'.format(stack_name, "green")
 
 # Create Estimator with debug hooks
 
@@ -172,14 +173,19 @@ with open('cloud_formation/training.vars', 'w' ) as f:
     f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\n\nexport STEPFUNCTION_ARN={}'.format(
         job_name, endpoint_name, stepfunction_arn))
 
-# Write deployment configuration
+# Write deployment parameters
 
-with open('cloud_formation/training.json', 'w' ) as f:
-    params = {
-        'CommitId': trial_name,
-        'EndpointName': endpoint_name,
+params_deploy = {
+    "Parameters": {
+        "CommitId": trial_name,
+        "EndpointName": endpoint_name,
+        "EndpointVariant": "AllTraffic",
+        "CoolDownEndpointName": cooldown_endpoint_name, 
+        "CoolDownVariant": "AllTraffic",
     }
-    f.write(json.dumps(params))
+}
+with open('cloud_formation/training.json', 'w' ) as f:
+    f.write(json.dumps(params_deploy))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))

@@ -9,7 +9,6 @@ Parameters:
     Description: The commit id associated with the endpoint
   EndpointName:
     Type: String
-    Default: regression-c0a6afb44bb111eaabaaebff58b910ef
     Description: The name of the endpoint to switch to
   EndpointVariant:
     Description: Name of the SageMaker variant
@@ -17,23 +16,21 @@ Parameters:
     Type: String
   CoolDownEndpointName:
     Type: String
-    Default: regression-fb4528664bd011eaabaaebff58b910ef
     Description: The name of the endpoint to cool down post deploy
   CoolDownVariant:
     Description: Name of the SageMaker variant for cooldown
     Default: 'AllTraffic'
     Type: String
-  AutoScalingEnabled:
-    Type: String
-    Default: "True"
-    Description: Switch to enable AutoScaling
-    AllowedValues: ["True", "False"]
+  CoolDownCapacity:
+    Default: '1'
+    Description: Cooldown instance capacity
+    Type: Number  
   AutoScalingMinCapacity:
     Default: '1'
     Description: Minimum number of instances for endpoint
     Type: Number
   AutoScalingMaxCapacity:
-    Default: '3'
+    Default: '1'
     Description: Maximum number of instances for endpoint
     Type: Number
   AutoScalingCoolDownPeriod:
@@ -46,7 +43,7 @@ Parameters:
     Type: Number
 
 Conditions:
-  CreateAutoScaling: !Equals [!Ref AutoScalingEnabled, "True"]
+  CreateAutoScaling: !Not [!Equals [!Ref AutoScalingMaxCapacity, '1']]
 
 # Attempt to add canary deployments
 # https://aws.amazon.com/blogs/compute/implementing-canary-deployments-of-aws-lambda-functions-with-alias-traffic-shifting/
@@ -166,8 +163,10 @@ Resources:
           Statement:
             - Effect: "Allow"
               Action:
-                - sagemaker:UpdateEndpointWeightsAndCapacities
+                - sagemaker:DeleteEndpoint
                 - sagemaker:DescribeEndpoint
+                - sagemaker:DeleteEndpointConfig
+                - sagemaker:UpdateEndpointWeightsAndCapacities
               Resource: 
                 "arn:aws:sagemaker:*:*:endpoint/*"
         - Version: "2012-10-17"
@@ -184,6 +183,7 @@ Resources:
           CURRENT_VERSION: !GetAtt RegressionFunction.Version.Version
           ENDPOINT_NAME: !Ref CoolDownEndpointName
           VARIANT_NAME: !Ref CoolDownVariant
+          INSTANCE_COUNT: !Ref CoolDownCapacity
 
   AliasErrorMetricGreaterThanZeroAlarm:
     Type: "AWS::CloudWatch::Alarm"
@@ -243,7 +243,7 @@ Resources:
       ScalingTargetId: !Ref AutoScalingTarget
       TargetTrackingScalingPolicyConfiguration: 
         PredefinedMetricSpecification: 
-          PredefinedMetricType: EndpointVariantInvocationsPerInstance
+          PredefinedMetricType: SageMakerVariantInvocationsPerInstance
         ScaleInCooldown: !Ref AutoScalingCoolDownPeriod
         ScaleOutCooldown: !Ref AutoScalingCoolDownPeriod
         TargetValue: !Ref AutoScalingInvocationsPerInstance

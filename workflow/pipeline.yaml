@@ -296,7 +296,7 @@ Resources:
           Name: Monitor
           Actions:
             -
-              Name: CreateScedule
+              Name: CreateSchedule
               InputArtifacts:
                 - Name: ModelSourceOutput
               ActionTypeId:

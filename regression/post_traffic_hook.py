@@ -32,8 +32,9 @@ def lambda_handler(event, context):
     current_version = os.environ['CURRENT_VERSION']
     endpoint_name = os.environ['ENDPOINT_NAME']
     variant_name = os.environ['VARIANT_NAME']
-    print('version: {} endpoint: {}/{} event: {}'.format(
-        current_version, endpoint_name, variant_name, json.dumps(event)))
+    instance_count = int(os.environ['INSTANCE_COUNT'])
+    print('version: {} endpoint: {}/{} instance count: {} event: {}'.format(
+        current_version, endpoint_name, variant_name, instance_count, json.dumps(event)))
 
     # Get boto3 sagemaker client and endpoint
     sm = boto3.client('sagemaker')
@@ -43,9 +44,14 @@ def lambda_handler(event, context):
         # First check the endpoint is in service
         response = sm.describe_endpoint(EndpointName=endpoint_name)
         print('describe_endpoint', response)
-        if response['EndpointStatus'] != "InService":
-            error_message = "Unable to update endpoint not InService"
-        else:
+        if instance_count == 0:
+            # Delete the endpoint and config
+            endpoint_config_name = response['EndpointConfigName']
+            response = sm.delete_endpoint(EndpointName=endpoint_name)
+            print('delete_endpoint', response)
+            response = sm.delete_endpoint_config(EndpointConfigName=endpoint_config_name)
+            print('delete_endpoint_config', response)
+        elif response['EndpointStatus'] == "InService":
             # Return to the minimum instance count
             response = sm.update_endpoint_weights_and_capacities(
                 EndpointName=endpoint_name,
@@ -57,15 +63,19 @@ def lambda_handler(event, context):
                 ]
             )
             print('update_endpoint_weights_and_capacities', response)
+        else:
+            print('endpoint not in service')
+            error_message = "Unable to update endpoint not InService"
     except ClientError as e:
+        print('endpoint error', e)
         error_message = e.response['Error']['Message']
 
     # Get boto3 sagemaker client and endpoint
     cd = boto3.client('codedeploy')
 
     try:
-        if error_message:
-            # Write failure if endpoint is 
+        if error_message and not error_message.startswith('Could not find endpoint'):
+            # Write failure if endpoint exists and unable to be updated 
             response = cd.put_lifecycle_event_hook_execution_status(
                 deploymentId=event['DeploymentId'],
                 lifecycleEventHookExecutionId=event['LifecycleEventHookExecutionId'],
@@ -88,11 +98,8 @@ def lambda_handler(event, context):
             }
     except ClientError as e:
         # Error attempting to update the cloud formation
+        print('code deploy error', e)
         return {
             "statusCode": 500,
             "message": e.response['Error']['Message']            
         }
-
-
-
-
