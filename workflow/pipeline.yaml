@@ -506,6 +506,7 @@ Resources:
                 - s3:*
                 - codebuild:*
                 - cloudformation:*
+                - lambda:Invoke
                 - iam:PassRole
                 - sns:Publish
                 Effect: Allow
