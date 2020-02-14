@@ -174,7 +174,7 @@ Resources:
   JobMonitoringEvent:
     Type: "AWS::Events::Rule"
     Properties: 
-      Description: "Event that will monitor the training job and inform codepipeline as it finishes"
+      Description: "Event that will be called when the step function completes"
       Name: !Sub ${AWS::StackName}-mlops-monitor
       EventPattern: 
         source: 
@@ -443,13 +443,14 @@ Resources:
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole           
       Policies:
-        - PolicyName: CloudFormationRole
+        - PolicyName: LambdaRole
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Action:
                   - codepipeline:GetPipelineState
                   - codepipeline:PutApprovalResult
+                  - lambda:Invoke
                   - ssm:GetParameter
                   - ssm:PutParameter  
                 Effect: Allow
