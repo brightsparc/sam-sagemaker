@@ -122,10 +122,13 @@ Resources:
               if stageState['stageName'] == stage_name:
                 for actionState in stageState['actionStates']:
                   if actionState['actionName'] == action_name:
-                    latestExecution = actionState['latestExecution']
-                    if latestExecution['status'] != 'InProgress':
-                      raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
-                    token = latestExecution['token']
+                    if not 'latestExecution' in actionState:
+                      return "Approval not yet available"
+                    else:
+                      latestExecution = actionState['latestExecution']
+                      if latestExecution['status'] != 'InProgress':
+                        raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
+                      token = latestExecution['token']
             if token is None:
               raise(Exception("Action token wasn't found. Aborting..."))
             # Check status
@@ -243,20 +246,6 @@ Resources:
                 EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
-              Name: SuggestBaseline
-              Namespace: BaselineVariables
-              InputArtifacts:
-                - Name: ModelSourceOutput
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
-              RunOrder: 1
-            -
               Name: ApproveTrain
               ActionTypeId:
                 Category: Approval
@@ -288,6 +277,20 @@ Resources:
                 StackName: !Sub ${AWS::StackName}-deploy-dev
                 TemplateConfiguration: ModelTrainOutput::cloud_formation/training.json
                 TemplatePath: ModelSourceOutput::template.yaml
+              RunOrder: 1
+            -
+              Name: SuggestBaseline
+              Namespace: BaselineVariables
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SuggestBaselineProject
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: Monitor
