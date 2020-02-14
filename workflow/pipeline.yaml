@@ -281,7 +281,7 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 RoleArn: !GetAtt CFNRole.Arn
-                Capabilities: CAPABILITY_IAM
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
                 StackName: !Sub ${AWS::StackName}-deploy
                 TemplateConfiguration: ModelTrainOutput::cloud_formation/deploy.json
                 TemplatePath: ModelTrainOutput::cloud_formation/deploy.yaml
