@@ -24,6 +24,7 @@ sagemaker_execution_role = sys.argv[3]
 workflow_arn = sys.argv[4]
 stack_name = sys.argv[5] 
 trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
+live_parameter_name = sys.argv[7]
 
 start = time.time()
 
@@ -35,10 +36,17 @@ execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionI
 job_name = name_from_base(execution_id)
 print('Staring Training job: {}'.format(job_name))
 
-# TODO: Lookup environment to get live blue/green from current lambda
+# Lookup environment to get live blue/green from current lambda
+# TODO: Add a deployment success event to switch the paraemter
+# see: https://docs.aws.amazon.com/codedeploy/latest/userguide/monitoring-cloudwatch-events.html
 
-endpoint_name = '{}-{}'.format(stack_name, "blue")
-cooldown_endpoint_name = '{}-{}'.format(stack_name, "green")
+ssm = boto3.client('ssm')
+response = ssm.get_parameter(Name=live_parameter_name)
+print('get_parameter', response)
+live_parameter = response['Parameter']['Value']
+cooldown_parameter = 'green' if live_parameter == 'blue' else 'blue'
+endpoint_name = '{}-{}'.format(stack_name, live_parameter)
+cooldown_endpoint_name = '{}-{}'.format(stack_name, cooldown_parameter)
 
 # Create Estimator with debug hooks
 
@@ -170,8 +178,8 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\n\nexport STEPFUNCTION_ARN={}'.format(
-        job_name, endpoint_name, stepfunction_arn))
+    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\nexport COOLDOWN_ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
+        job_name, endpoint_name, cooldown_endpoint_name, stepfunction_arn))
 
 # Write deployment parameters
 

@@ -22,6 +22,14 @@ Parameters:
     Description: The bucket prefix for uploading data and model assets
 
 Resources:  
+  DeploymentParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      AllowedPattern: ^blue|green$
+      Description: Flag for which environment is currently live
+      Type: String
+      Value: "blue"
+
   ModelBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -243,7 +251,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"DEPLOYMENT_PARAMETER_NAME","value":"${DeploymentParameter}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
               Name: ApproveTrain
@@ -273,10 +281,11 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 RoleArn: !GetAtt CFNRole.Arn
-                Capabilities: CAPABILITY_NAMED_IAM
+                Capabilities: CAPABILITY_AUTO_EXPAND
                 StackName: !Sub ${AWS::StackName}-deploy-dev
                 TemplateConfiguration: ModelTrainOutput::cloud_formation/training.json
                 TemplatePath: ModelSourceOutput::template.yaml
+                OutputFileName: cloud_formation/deploy_output.json
               RunOrder: 1
             -
               Name: SuggestBaseline
@@ -469,7 +478,7 @@ Resources:
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
       Policies:
-        - PolicyName: UploadAccess
+        - PolicyName: TrainModel
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -480,6 +489,8 @@ Resources:
                 - logs:CreateLogGroup
                 - logs:CreateLogStream
                 - logs:PutLogEvents
+                - ssm:GetParameter
+                - ssm:PutParameter
                 Effect: Allow
                 Resource: '*'
               - Action:

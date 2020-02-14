@@ -302,12 +302,6 @@ Outputs:
   RegressionApi:
     Description: "API Gateway endpoint URL for Prod stage for Regression function"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/regression/"
-  RegressionFunction:
-    Description: "Regression Lambda Function ARN"
-    Value: !GetAtt RegressionFunction.Arn
-  RegressionFunctionRoleIamRole:
-    Description: "Explicit IAM Role created for Regression function"
-    Value: !GetAtt RegressionFunctionRole.Arn
   RegressionDeploymentApplication:
     Description: "The deployment application for "
     Value: !Ref ServerlessDeploymentApplication
