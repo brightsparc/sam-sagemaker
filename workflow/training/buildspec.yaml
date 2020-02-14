@@ -30,6 +30,7 @@ phases:
       - source cloud_formation/training.vars
       - echo "Create regression commit file and package CFN artifacts"
       - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > regression/commit.txt 
+      - echo $CODEBUILD_BUILD_ID >> regression/commit.txt # Add build ID when commit doesn't change
       - aws cloudformation package --template-file template.yaml --output-template-file cloud_formation/deploy.yaml --s3-bucket $ARTIFACT_BUCKET
   
 artifacts:
