@@ -254,6 +254,20 @@ Resources:
                 EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"DEPLOYMENT_PARAMETER_NAME","value":"${DeploymentParameter}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
+              Name: SuggestBaseline
+              Namespace: BaselineVariables
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SuggestBaselineProject
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+              RunOrder: 1
+            -
               Name: ApproveTrain
               ActionTypeId:
                 Category: Approval
@@ -286,20 +300,6 @@ Resources:
                 TemplateConfiguration: ModelTrainOutput::cloud_formation/training.json
                 TemplatePath: ModelSourceOutput::template.yaml
                 OutputFileName: cloud_formation/deploy_output.json
-              RunOrder: 1
-            -
-              Name: SuggestBaseline
-              Namespace: BaselineVariables
-              InputArtifacts:
-                - Name: ModelSourceOutput
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: Monitor

@@ -24,7 +24,7 @@ sagemaker_execution_role = sys.argv[3]
 workflow_arn = sys.argv[4]
 stack_name = sys.argv[5] 
 trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
-live_parameter_name = sys.argv[7]
+deployment_parameter_name = sys.argv[7]
 
 start = time.time()
 
@@ -41,12 +41,23 @@ print('Staring Training job: {}'.format(job_name))
 # see: https://docs.aws.amazon.com/codedeploy/latest/userguide/monitoring-cloudwatch-events.html
 
 ssm = boto3.client('ssm')
-response = ssm.get_parameter(Name=live_parameter_name)
+response = ssm.get_parameter(Name=deployment_parameter_name)
 print('get_parameter', response)
-live_parameter = response['Parameter']['Value']
-cooldown_parameter = 'green' if live_parameter == 'blue' else 'blue'
-endpoint_name = '{}-{}'.format(stack_name, live_parameter)
+deployment_parameter = response['Parameter']['Value']
+cooldown_parameter = 'green' if deployment_parameter == 'blue' else 'blue'
+endpoint_name = '{}-{}'.format(stack_name, deployment_parameter)
 cooldown_endpoint_name = '{}-{}'.format(stack_name, cooldown_parameter)
+
+# Check if the endpoint exists
+
+update_endpoint = False
+try:
+    sm = boto3.client('sagemaker')
+    response = sm.describe_endpoint(EndpointName=endpoint_name)
+    print('describe_endpoint', response)
+    update_endpoint = True
+except ClientError as e:
+    print('endpoint error', e)
 
 # Create Estimator with debug hooks
 
@@ -145,9 +156,10 @@ endpoint_config_step = steps.EndpointConfigStep(
 )
 
 endpoint_step = steps.EndpointStep(
-    "Create Endpoint",
+    "Create or Update Endpoint",
     endpoint_name=execution_input['EndpointName'],
-    endpoint_config_name=job_name
+    endpoint_config_name=job_name,
+    update=update_endpoint
 )
 
 workflow_definition = steps.Chain([
