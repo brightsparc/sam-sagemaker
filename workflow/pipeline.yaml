@@ -22,6 +22,22 @@ Parameters:
     Description: The bucket prefix for uploading data and model assets
 
 Resources:  
+  ModelBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-model-${AWS::AccountId}-${AWS::Region}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-artifact-${AWS::AccountId}-${AWS::Region}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
   TrainModelProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -59,7 +75,7 @@ Resources:
   CreateScheduleProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${AWS::StackName}-mlops-monitorschedule
+      Name: !Sub ${AWS::StackName}-mlops-createschedule
       Description: Suggest a monitor baseline using using SageMaker
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
@@ -238,7 +254,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}",{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
               Name: ApproveTrain
@@ -287,28 +303,9 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref CreateScheduleProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}"},{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"}]'
               RunOrder: 1
-
-
-  ModelBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    Properties: 
-      BucketName: !Sub ${AWS::StackName}-model-${AWS::AccountId}-${AWS::Region}
-      AccessControl: Private
-      VersioningConfiguration:
-        Status: Enabled
-            
-  ArtifactStoreBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    Properties: 
-      BucketName: !Sub ${AWS::StackName}-pipeline-${AWS::AccountId}-${AWS::Region}
-      AccessControl: Private
-      VersioningConfiguration:
-        Status: Enabled
-            
+           
   SagemakerExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -373,8 +370,6 @@ Resources:
                 - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
                 - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
                 - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
-                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForECSTaskRule
-                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForBatchJobsRule
                 Effect: Allow
 
   LambdaRole:
