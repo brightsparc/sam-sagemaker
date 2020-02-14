@@ -203,23 +203,23 @@ Resources:
           import boto3
           ssm = boto3.client('ssm')
           def lambda_handler(event, context):
-            deployment_parameter_name='${DeploymentParameter}'
+            deployment_parameter_name='CFN-DeploymentParameter-gXldhhVE9diS'
             # Get current parameter
-            response = client.get_parameter(
+            response = ssm.get_parameter(
               Name=deployment_parameter_name
             )
             print('get_parameter',response )
             deployment_parameter = response['Parameter']['Value']
-            cooldown_parameter = 'green' if live_parameter == 'blue' else 'blue'
+            cooldown_parameter = 'green' if deployment_parameter == 'blue' else 'blue'
             # Put cooldown
-            response = client.put_parameter(
+            response = ssm.put_parameter(
               Name=deployment_parameter_name,
               Value=cooldown_parameter,
               Type='String',
               Overwrite=True,
             )
             print('put_parameter', response)
-            return 'Done'
+            return cooldown_parameter
       Description: "Function that will start a new Sagemaker Training Job"
 
   WorkflowPipeline:
@@ -507,7 +507,7 @@ Resources:
                 - s3:*
                 - codebuild:*
                 - cloudformation:*
-                - lambda:Invoke
+                - lambda:*
                 - iam:PassRole
                 - sns:Publish
                 Effect: Allow
