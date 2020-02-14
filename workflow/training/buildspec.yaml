@@ -19,8 +19,10 @@ phases:
       - python workflow/training/data_prep.py $BUCKET $PREFIX
   build:
     commands:
+      - echo "Running create_trial.py"
+      - python workflow/training/create_trial.py $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
       - echo "Running training.py"
-      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $EXPERIMENT_NAME $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
+      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
   post_build:
     commands:
       - echo "Exporting env vars"
@@ -28,4 +30,4 @@ phases:
   
 artifacts:
   files:
-    - '**/*'
+    - 'cloud_formation/*'

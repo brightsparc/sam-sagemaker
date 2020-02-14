@@ -1,9 +1,9 @@
 import boto3
 from botocore.exceptions import ClientError
+import json
 import os
 import time
 import sys
-import uuid
 
 # Import Sagemaker and debugger config
 import sagemaker
@@ -22,9 +22,8 @@ bucket_name = sys.argv[1]
 prefix = sys.argv[2]
 sagemaker_execution_role = sys.argv[3]
 workflow_arn = sys.argv[4]
-exp_name = sys.argv[5] 
-stack_name = sys.argv[6] 
-trial_name = sys.argv[7][:7] # Take the first 8 characters of commit hash
+stack_name = sys.argv[5] 
+trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
 
 start = time.time()
 
@@ -33,39 +32,12 @@ start = time.time()
 codepipeline = boto3.client('codepipeline')
 response = codepipeline.get_pipeline_state( name=stack_name )
 execution_id = response['stageStates'][0]['latestExecution']['pipelineExecutionId']
-print('Staring Pipeline execution id: {}'.format(execution_id))
+job_name = name_from_base(execution_id)
+print('Staring Training job: {}'.format(job_name))
 
-# Create Experiment and Trial
+# TODO: Lookup environment to get blue/green from current lambda
 
-print('Creating experiment: {} and trial: {}'.format(exp_name, trial_name))
-
-sm = boto3.client('sagemaker')
-
-try:
-    response = sm.create_experiment(
-        ExperimentName=exp_name,
-        DisplayName=exp_name,
-        Description='MLOps experiment'
-    )
-    print("Created experiment: %s" % response)
-except ClientError as e:
-    if e.response['Error']['Code'] == 'ValidationException':
-        print("Experiment %s already exists" % exp_name)
-    else:
-        print("Unexpected error: %s" % e)
-
-try:
-    response = sm.create_trial(
-        TrialName=trial_name,
-        DisplayName=trial_name,
-        ExperimentName=exp_name,
-    )
-    print("Created trial: %s" % response)
-except ClientError as e:
-    if e.response['Error']['Code'] == 'ValidationException':
-        print("Trial %s already exists" % trial_name)
-    else:
-        print("Unexpected error: %s" % e)
+endpoint_name = name_from_base(stack_name)
 
 # Create Estimator with debug hooks
 
@@ -76,7 +48,6 @@ debug_output_path = 's3://{0}/{1}/model/debug'.format(bucket_name, prefix)
 model_code_location = 's3://{0}/{1}/code'.format(bucket_name, prefix)
 entry_point='train_xgboost.py'
 source_dir='workflow/training/'
-job_name = name_from_base(execution_id)
 
 # TODO: Upload source files here given we are not calling fit
 
@@ -111,7 +82,7 @@ hyperparameters = {
     "silent": "0",
     "objective": "multi:softmax",
     "num_class": "15",
-    "num_round": "20"
+    "num_round": "1" # TEMP: Hack to make faster
 }
 
 xgb = XGBoost(
@@ -187,7 +158,7 @@ print('Workflow updated: {}'.format(workflow_arn))
 time.sleep(5)
 
 execution = workflow.execute(
-    inputs={ 'EndpointName': exp_name }
+    inputs={ 'EndpointName': endpoint_name }
 )
 stepfunction_arn = execution.execution_arn
 print('Workflow exectuted: {}'.format(stepfunction_arn))
@@ -200,6 +171,15 @@ if not os.path.exists('cloud_formation'):
 with open('cloud_formation/training.vars', 'w' ) as f:
     f.write('export TRAINING_JOB_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
         job_name, stepfunction_arn))
+
+# Write deployment configuration
+
+with open('cloud_formation/training.json', 'w' ) as f:
+    params = {
+        'CommitId': trial_name,
+        'EndpointName': endpoint_name,
+    }
+    f.write(json.dumps(params))
 
 end = time.time()
 print('Training launched in: {}'.format(end-start))
