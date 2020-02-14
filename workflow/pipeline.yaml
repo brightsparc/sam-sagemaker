@@ -116,6 +116,7 @@ Resources:
             print('event', json.dumps(event))
             # Define stage and action name
             status = event['detail']['status']
+            print('status', status)
             if status == 'RUNNING':
               return "State machine still running"
             # The pipeline will be the same name step function workflow
@@ -148,8 +149,7 @@ Resources:
             else:
               result={
                 'summary': 'Workflow unsuccesful with status: {}'.format(status),
-                'status': 'Rejected',
-                'link': 'https://docs.aws.amazon.com/step-functions/latest/dg/cw-events.html#cw-events-execution-failed'
+                'status': 'Rejected'
               }
             # Update approval
             response = codepipeline.put_approval_result(
@@ -296,7 +296,7 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 RoleArn: !GetAtt CFNRole.Arn
                 Capabilities: CAPABILITY_AUTO_EXPAND
-                StackName: !Sub ${AWS::StackName}-deploy-dev
+                StackName: !Sub ${AWS::StackName}-deploy
                 TemplateConfiguration: ModelTrainOutput::cloud_formation/training.json
                 TemplatePath: ModelSourceOutput::template.yaml
                 OutputFileName: cloud_formation/deploy_output.json
@@ -421,6 +421,8 @@ Resources:
             Service: [cloudformation.amazonaws.com]
         Version: '2012-10-17'
       Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
       Policies:
         - PolicyName: CloudFormationRole
           PolicyDocument:
