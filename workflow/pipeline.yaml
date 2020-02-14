@@ -132,7 +132,7 @@ Resources:
                 for actionState in stageState['actionStates']:
                   if actionState['actionName'] == action_name:
                     if not 'latestExecution' in actionState:
-                      return "Approval not yet available"
+                      raise(Exception("Approval not available"))
                     else:
                       latestExecution = actionState['latestExecution']
                       if latestExecution['status'] != 'InProgress':
@@ -251,21 +251,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"DEPLOYMENT_PARAMETER_NAME","value":"${DeploymentParameter}","type":"PLAINTEXT"}]'
-              RunOrder: 1
-            -
-              Name: SuggestBaseline
-              Namespace: BaselineVariables
-              InputArtifacts:
-                - Name: ModelSourceOutput
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                ProjectName: !Ref SuggestBaselineProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"DEPLOYMENT_PARAMETER_NAME","value":"${DeploymentParameter}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactStoreBucket}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
               Name: ApproveTrain
@@ -295,11 +281,25 @@ Resources:
               Configuration:
                 ActionMode: CREATE_UPDATE
                 RoleArn: !GetAtt CFNRole.Arn
-                Capabilities: CAPABILITY_AUTO_EXPAND
+                Capabilities: CAPABILITY_IAM
                 StackName: !Sub ${AWS::StackName}-deploy
-                TemplateConfiguration: ModelTrainOutput::cloud_formation/training.json
-                TemplatePath: ModelSourceOutput::template.yaml
+                TemplateConfiguration: ModelTrainOutput::cloud_formation/deploy.json
+                TemplatePath: ModelTrainOutput::cloud_formation/deploy.yaml
                 OutputFileName: cloud_formation/deploy_output.json
+              RunOrder: 1
+            -
+              Name: SuggestBaseline
+              Namespace: BaselineVariables
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SuggestBaselineProject
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
               RunOrder: 1
         -
           Name: Monitor
@@ -315,7 +315,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref CreateScheduleProject
-                EnvironmentVariables: !Sub '[{"name":"BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}"},{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"}]'
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}"},{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"}]'
               RunOrder: 1
            
   SagemakerExecutionRole:

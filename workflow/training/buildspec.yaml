@@ -17,17 +17,20 @@ phases:
   pre_build:
     commands:
       - echo "Running data_prep.py"
-      - python workflow/training/data_prep.py $BUCKET $PREFIX
+      - python workflow/training/data_prep.py $MODEL_BUCKET $PREFIX
   build:
     commands:
       - echo "Running create_trial.py"
       - python workflow/training/create_trial.py $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
       - echo "Running training.py"
-      - python workflow/training/training.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION $DEPLOYMENT_PARAMETER_NAME
+      - python workflow/training/training.py $MODEL_BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION $DEPLOYMENT_PARAMETER_NAME
   post_build:
     commands:
       - echo "Exporting env vars"
       - source cloud_formation/training.vars
+      - echo "Create regression commit file and package CFN artifacts"
+      - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > regression/commit.txt 
+      - aws cloudformation package --template-file template.yaml --output-template-file cloud_formation/deploy.yaml --s3-bucket $ARTIFACT_BUCKET
   
 artifacts:
   files:

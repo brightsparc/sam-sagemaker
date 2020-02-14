@@ -10,4 +10,4 @@ phases:
   build:
     commands:
       - echo "Running suggest_baseline.py"
-      - python workflow/schedule/create_schedule.py $BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $PROCESSING_JOB_NAME $ENDPOINT_NAME
+      - python workflow/schedule/create_schedule.py $MODEL_BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $PROCESSING_JOB_NAME $ENDPOINT_NAME

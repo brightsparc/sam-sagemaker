@@ -204,7 +204,7 @@ params_deploy = {
         "CoolDownVariant": "AllTraffic",
     }
 }
-with open('cloud_formation/training.json', 'w' ) as f:
+with open('cloud_formation/deploy.json', 'w' ) as f:
     f.write(json.dumps(params_deploy))
 
 end = time.time()
