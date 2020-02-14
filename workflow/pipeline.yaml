@@ -300,7 +300,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref SuggestBaselineProject
                 EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
-              RunOrder: 1
+              RunOrder: 2
         -
           Name: Monitor
           Actions:
@@ -422,7 +422,7 @@ Resources:
         Version: '2012-10-17'
       Path: /
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+        - arn:aws:iam::aws:policy/AdministratorAccess # TEMP: Will need to add specific permissions to support delete stack
       Policies:
         - PolicyName: CloudFormationRole
           PolicyDocument:

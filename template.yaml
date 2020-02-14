@@ -299,10 +299,10 @@ Outputs:
   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  RegressionApi:
+  RegressionApplication:
+    Description: "Regression deployment application"
+    Value: !Ref ServerlessDeploymentApplication
+  RegressionApiUrl:
     Description: "API Gateway endpoint URL for Prod stage for Regression function"
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/regression/"
-  RegressionDeploymentApplication:
-    Description: "The deployment application for "
-    Value: !Ref ServerlessDeploymentApplication
   

@@ -128,17 +128,24 @@ print('uploaded code to: {}'.format(xgb.uploaded_code.s3_prefix))
 # Create Workflow steps
 
 execution_input = ExecutionInput(schema={
+    'TrainLocation': str,
+    'ValidationLocation': str,
     'EndpointName': str
 })
+execution_params = {
+    'TrainLocation': input_train_path,
+    'ValidationLocation': input_validation_path,
+    'EndpointName': endpoint_name
+}
 
 training_step = steps.TrainingStep(
     'Train Step', 
     estimator=xgb,
     data={
-        'train': sagemaker.s3_input(input_train_path, content_type='libsvm'),
-        'validation': sagemaker.s3_input(input_validation_path, content_type='libsvm')
+        'train': sagemaker.s3_input(execution_input['TrainLocation'], content_type='libsvm'),
+        'validation': sagemaker.s3_input(execution_input['ValidationLocation'], content_type='libsvm')
     },
-    job_name=job_name
+    job_name=job_name # Require embedding this to job_name matches uploaded code
 )
 
 model_step = steps.ModelStep(
@@ -179,7 +186,7 @@ print('Workflow updated: {}'.format(workflow_arn))
 time.sleep(5)
 
 execution = workflow.execute(
-    inputs={ 'EndpointName': endpoint_name }
+    inputs=execution_params
 )
 stepfunction_arn = execution.execution_arn
 print('Workflow exectuted: {}'.format(stepfunction_arn))
