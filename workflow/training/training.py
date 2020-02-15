@@ -24,7 +24,6 @@ sagemaker_execution_role = sys.argv[3]
 workflow_arn = sys.argv[4]
 stack_name = sys.argv[5] 
 trial_name = sys.argv[6][:7] # Take the first 8 characters of commit hash
-deployment_parameter_name = sys.argv[7]
 
 start = time.time()
 
@@ -40,13 +39,18 @@ print('Staring Training job: {}'.format(job_name))
 # TODO: Add a deployment success event to switch the paraemter
 # see: https://docs.aws.amazon.com/codedeploy/latest/userguide/monitoring-cloudwatch-events.html
 
-ssm = boto3.client('ssm')
-response = ssm.get_parameter(Name=deployment_parameter_name)
-print('get_parameter', response)
-deployment_parameter = response['Parameter']['Value']
-cooldown_parameter = 'green' if deployment_parameter == 'blue' else 'blue'
-endpoint_name = '{}-{}'.format(stack_name, deployment_parameter)
-cooldown_endpoint_name = '{}-{}'.format(stack_name, cooldown_parameter)
+# Attempt to read target endpoint, if not found default to 'blue/green'
+endpoint_name = '{}-{}'.format(stack_name, 'blue')
+cooldown_endpoint_name = '{}-{}'.format(stack_name, 'green')
+try:
+    ssm = boto3.client('ssm')
+    response = ssm.get_parameter(Name=stack_name)
+    print('get_parameter', response)
+    endpoint_name = response['Parameter']['Value']
+    cooldown_parameter = 'green' if endpoint_name.endswith('blue') else 'blue'
+    cooldown_endpoint_name = '{}-{}'.format(stack_name, cooldown_parameter)
+except ClientError as e:
+    print('get_parameter error', e)
 
 # Check if the endpoint exists
 

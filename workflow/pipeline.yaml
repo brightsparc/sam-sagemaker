@@ -22,14 +22,6 @@ Parameters:
     Description: The bucket prefix for uploading data and model assets
 
 Resources:  
-  DeploymentParameter:
-    Type: AWS::SSM::Parameter
-    Properties: 
-      AllowedPattern: ^blue|green$
-      Description: Flag for which environment is currently live
-      Type: String
-      Value: "blue"
-
   ModelBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -201,26 +193,50 @@ Resources:
       Code: 
         ZipFile: !Sub |
           import boto3
+          import io
+          import zipfile
+          import json
+          s3 = boto3.client('s3')
           ssm = boto3.client('ssm')
+          codepipeline = boto3.client('codepipeline')
           def lambda_handler(event, context):
-            deployment_parameter_name='CFN-DeploymentParameter-gXldhhVE9diS'
-            # Get current parameter
-            response = ssm.get_parameter(
-              Name=deployment_parameter_name
-            )
-            print('get_parameter',response )
-            deployment_parameter = response['Parameter']['Value']
-            cooldown_parameter = 'green' if deployment_parameter == 'blue' else 'blue'
-            # Put cooldown
-            response = ssm.put_parameter(
-              Name=deployment_parameter_name,
-              Value=cooldown_parameter,
-              Type='String',
-              Overwrite=True,
-            )
-            print('put_parameter', response)
-            return cooldown_parameter
-      Description: "Function that will start a new Sagemaker Training Job"
+            print('event', json.dumps(event))
+            pipeline_name = '${AWS::StackName}'
+            jobId = event["CodePipeline.job"]["id"]
+            cooldown_endpoint_name = None
+            try:
+              # Get the deployment parameters
+              for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
+                if inputArtifacts['name'] == 'ModelTrainOutput':
+                  s3Location = inputArtifacts['location']['s3Location']
+                  zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
+                  with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
+                    deploy = json.loads(z.read('cloud_formation/deploy.json').decode('utf-8'))
+                    cooldown_endpoint_name = deploy['Parameters']['CoolDownEndpointName']
+              if cooldown_endpoint_name is None:
+                raise(Exception("deploy.json wasn't found"))
+              # Store cooldown endpoint in parameter
+              response = ssm.put_parameter(
+                Name=pipeline_name,
+                Value=cooldown_endpoint_name,
+                Type='String',
+                Overwrite=True,
+              )
+              # Update approval
+              response = codepipeline.put_job_success_result(jobId=jobId)
+              print('put_job_success_result', response)
+            except Exception as e:
+              print(e)
+              resp = codepipeline.put_job_failure_result(
+                  jobId=jobId,
+                  failureDetails={
+                      'type': 'ConfigurationError',
+                      'message': str(e),
+                      'externalExecutionId': context.aws_request_id
+                  }
+              )
+            return "Done"
+      Description: "Function that will update parameter to"
 
   WorkflowPipeline:
     Type: AWS::StepFunctions::StateMachine
@@ -268,7 +284,7 @@ Resources:
                 OAuthToken: !Ref 'GitHubToken'
               RunOrder: 1
         -
-          Name: Train
+          Name: TrainAndDeploy
           Actions:
             -
               Name: TrainModel
@@ -284,7 +300,7 @@ Resources:
                 Provider: CodeBuild
               Configuration:
                 ProjectName: !Ref TrainModelProject
-                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"DEPLOYMENT_PARAMETER_NAME","value":"${DeploymentParameter}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactStoreBucket}","type":"PLAINTEXT"}]'
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactStoreBucket}","type":"PLAINTEXT"}]'
               RunOrder: 1
             -
               Name: ApproveTrain
@@ -296,9 +312,6 @@ Resources:
               Configuration:
                   CustomData: 'Step functions completing will automatically approve this'
               RunOrder: 2
-        -
-          Name: Deploy
-          Actions:
             - 
               Name: DeployBlueGreen
               InputArtifacts:
@@ -322,6 +335,8 @@ Resources:
               RunOrder: 1
             -
               Name: SwitchDeployment
+              InputArtifacts:
+                - Name: ModelTrainOutput
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
@@ -330,6 +345,7 @@ Resources:
               Configuration:
                   FunctionName:
                     Ref: SwitchDeployment
+                  UserParameters: "#{TrainingVariables.COOLDOWN_ENDPOINT_NAME}"
               RunOrder: 2
         -
           Name: Monitor
@@ -450,8 +466,8 @@ Resources:
               - Action:
                   - codepipeline:GetPipelineState
                   - codepipeline:PutApprovalResult
-                  - lambda:Invoke
-                  - ssm:GetParameter
+                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutJobFailureResult
                   - ssm:PutParameter  
                 Effect: Allow
                 Resource: '*'
@@ -540,7 +556,6 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
                 - ssm:GetParameter
-                - ssm:PutParameter
                 Effect: Allow
                 Resource: '*'
               - Action:
