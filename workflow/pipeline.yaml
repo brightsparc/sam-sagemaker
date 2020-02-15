@@ -193,28 +193,18 @@ Resources:
       Code: 
         ZipFile: !Sub |
           import boto3
-          import io
-          import zipfile
           import json
-          s3 = boto3.client('s3')
           ssm = boto3.client('ssm')
           codepipeline = boto3.client('codepipeline')
           def lambda_handler(event, context):
             print('event', json.dumps(event))
             pipeline_name = '${AWS::StackName}'
             jobId = event["CodePipeline.job"]["id"]
-            cooldown_endpoint_name = None
             try:
               # Get the deployment parameters
-              for inputArtifacts in event["CodePipeline.job"]["data"]["inputArtifacts"]:
-                if inputArtifacts['name'] == 'ModelTrainOutput':
-                  s3Location = inputArtifacts['location']['s3Location']
-                  zip_bytes = s3.get_object(Bucket=s3Location['bucketName'], Key=s3Location['objectKey'])['Body'].read()
-                  with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as z:
-                    deploy = json.loads(z.read('cloud_formation/deploy.json').decode('utf-8'))
-                    cooldown_endpoint_name = deploy['Parameters']['CoolDownEndpointName']
-              if cooldown_endpoint_name is None:
-                raise(Exception("deploy.json wasn't found"))
+              config = event["CodePipeline.job"]['data']['actionConfiguration']['configuration']
+              cooldown_endpoint_name = config['UserParameters']
+              print('set param: {} to: {}'.format(pipeline_name, cooldown_endpoint_name))
               # Store cooldown endpoint in parameter
               response = ssm.put_parameter(
                 Name=pipeline_name,
@@ -222,7 +212,6 @@ Resources:
                 Type='String',
                 Overwrite=True,
               )
-              # Update approval
               response = codepipeline.put_job_success_result(jobId=jobId)
               print('put_job_success_result', response)
             except Exception as e:
@@ -236,7 +225,7 @@ Resources:
                   }
               )
             return "Done"
-      Description: "Function that will update parameter to"
+      Description: "Update SSM parameter with cooldown endpoint"
 
   WorkflowPipeline:
     Type: AWS::StepFunctions::StateMachine
@@ -284,7 +273,7 @@ Resources:
                 OAuthToken: !Ref 'GitHubToken'
               RunOrder: 1
         -
-          Name: TrainAndDeploy
+          Name: Train
           Actions:
             -
               Name: TrainModel
@@ -312,6 +301,9 @@ Resources:
               Configuration:
                   CustomData: 'Step functions completing will automatically approve this'
               RunOrder: 2
+        -
+          Name: Deploy
+          Actions:
             - 
               Name: DeployBlueGreen
               InputArtifacts:
@@ -335,8 +327,6 @@ Resources:
               RunOrder: 1
             -
               Name: SwitchDeployment
-              InputArtifacts:
-                - Name: ModelTrainOutput
               ActionTypeId:
                 Category: Invoke
                 Owner: AWS
