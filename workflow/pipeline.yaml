@@ -13,7 +13,7 @@ Parameters:
     Description: GitHub Repo to pull from. Only the Name. not the URL
     Type: String
   Branch:
-    Default: stepfunctions-workflow
+    Default: master
     Description: Branch to use from Repo. Only the Name. not the URL
     Type: String
   BucketPrefix:

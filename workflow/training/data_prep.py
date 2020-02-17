@@ -14,7 +14,7 @@ print('Data prep started...')
 
 s3 = boto3.resource('s3')
 
-source_bucket_name = "sagemaker-ap-southeast-2-691313291965" 
+source_bucket_name = "endtoendmlapp" 
 source_bucket_prefix = "aim362/data/"
 source_bucket = s3.Bucket(source_bucket_name)
 
