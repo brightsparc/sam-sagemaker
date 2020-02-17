@@ -39,16 +39,16 @@ print('Staring Training job: {}'.format(job_name))
 # TODO: Add a deployment success event to switch the paraemter
 # see: https://docs.aws.amazon.com/codedeploy/latest/userguide/monitoring-cloudwatch-events.html
 
-# Attempt to read target endpoint, if not found default to 'blue/green'
+# Attempt to read current live endpoint, if not found default to 'blue/green'
 endpoint_name = '{}-{}'.format(stack_name, 'blue')
 cooldown_endpoint_name = '{}-{}'.format(stack_name, 'green')
 try:
     ssm = boto3.client('ssm')
     response = ssm.get_parameter(Name=stack_name)
     print('get_parameter', response)
-    endpoint_name = response['Parameter']['Value']
-    cooldown_parameter = 'green' if endpoint_name.endswith('blue') else 'blue'
-    cooldown_endpoint_name = '{}-{}'.format(stack_name, cooldown_parameter)
+    cooldown_endpoint_name = response['Parameter']['Value'] # Set cooldown as current live
+    endpoint_env = 'green' if cooldown_endpoint_name.endswith('blue') else 'blue'
+    endpoint_name = '{}-{}'.format(stack_name, endpoint_env)
 except ClientError as e:
     print('get_parameter error', e)
 
@@ -201,8 +201,8 @@ if not os.path.exists('cloud_formation'):
     os.makedirs('cloud_formation')
 
 with open('cloud_formation/training.vars', 'w' ) as f:
-    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\nexport COOLDOWN_ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
-        job_name, endpoint_name, cooldown_endpoint_name, stepfunction_arn))
+    f.write('export TRAINING_JOB_NAME={}\nexport ENDPOINT_NAME={}\nexport STEPFUNCTION_ARN={}'.format(
+        job_name, endpoint_name, stepfunction_arn))
 
 # Write deployment parameters
 

@@ -203,12 +203,12 @@ Resources:
             try:
               # Get the deployment parameters
               config = event["CodePipeline.job"]['data']['actionConfiguration']['configuration']
-              cooldown_endpoint_name = config['UserParameters']
-              print('set param: {} to: {}'.format(pipeline_name, cooldown_endpoint_name))
+              endpoint_name = config['UserParameters']
+              print('set param: {} to: {}'.format(pipeline_name, endpoint_name))
               # Store cooldown endpoint in parameter
               response = ssm.put_parameter(
                 Name=pipeline_name,
-                Value=cooldown_endpoint_name,
+                Value=endpoint_name,
                 Type='String',
                 Overwrite=True,
               )
@@ -335,7 +335,7 @@ Resources:
               Configuration:
                   FunctionName:
                     Ref: SwitchDeployment
-                  UserParameters: "#{TrainingVariables.COOLDOWN_ENDPOINT_NAME}"
+                  UserParameters: "#{TrainingVariables.ENDPOINT_NAME}"
               RunOrder: 2
         -
           Name: Monitor

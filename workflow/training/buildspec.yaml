@@ -4,7 +4,6 @@ env:
   exported-variables:
     - TRAINING_JOB_NAME
     - ENDPOINT_NAME
-    - COOLDOWN_ENDPOINT_NAME
     - STEPFUNCTION_ARN
 
 phases:
