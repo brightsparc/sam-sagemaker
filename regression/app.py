@@ -56,6 +56,7 @@ def lambda_handler(event, context):
         "statusCode": 200,
         "body": json.dumps({
             "version": commit_id,
+            "endpoint_name": endpoint_name, # TEMP for debugging
             "predictions": predictions
         }),
     }

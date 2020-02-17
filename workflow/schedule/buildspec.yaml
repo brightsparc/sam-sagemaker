@@ -1,0 +1,13 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - echo "Installing sagemaker and pandas"
+      - pip install -r workflow/schedule/requirements.txt
+  build:
+    commands:
+      - echo "Running suggest_baseline.py"
+      - python workflow/schedule/create_schedule.py $MODEL_BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $PROCESSING_JOB_NAME $ENDPOINT_NAME

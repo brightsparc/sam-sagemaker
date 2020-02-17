@@ -1,0 +1,561 @@
+Description: Create a CodePipeline for a Machine Learning Model
+Parameters:
+  GitHubToken:
+    NoEcho: true
+    Description: Secret. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af OAuthToken with access to Repo. Go to https://github.com/settings/tokens
+    Type: String
+  GitHubUser:
+    Default: brightsparc
+    Description: GitHub UserName
+    Type: String
+  Repo:
+    Default: sam-sagemaker
+    Description: GitHub Repo to pull from. Only the Name. not the URL
+    Type: String
+  Branch:
+    Default: stepfunctions-workflow
+    Description: Branch to use from Repo. Only the Name. not the URL
+    Type: String
+  BucketPrefix:
+    Default: mlops
+    Type: String
+    Description: The bucket prefix for uploading data and model assets
+
+Resources:  
+  ModelBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-model-${AWS::AccountId}-${AWS::Region}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-artifact-${AWS::AccountId}-${AWS::Region}
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+
+  TrainModelProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-mlops-train
+      Description: Trains machine learning model using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: workflow/training/buildspec.yaml
+      TimeoutInMinutes: 30
+
+  SuggestBaselineProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-mlops-suggestbaseline
+      Description: Suggest a monitor baseline using using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: workflow/monitoring/buildspec.yaml
+      TimeoutInMinutes: 30 
+
+  CreateScheduleProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-mlops-createschedule
+      Description: Suggest a monitor baseline using using SageMaker
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: workflow/schedule/buildspec.yaml
+      TimeoutInMinutes: 30    
+    
+  MLOpsJobMonitor:
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      FunctionName: !Sub ${AWS::StackName}-mlops-monitor
+      Handler: index.lambda_handler
+      Runtime: python3.7
+      MemorySize: 512
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code: 
+        ZipFile: !Sub |
+          import boto3
+          import json
+          codepipeline = boto3.client('codepipeline')
+          def lambda_handler(event, context):
+            print('event', json.dumps(event))
+            # Define stage and action name
+            status = event['detail']['status']
+            print('status', status)
+            if status == 'RUNNING':
+              return "State machine still running"
+            # The pipeline will be the same name step function workflow
+            pipeline_name = '${AWS::StackName}'
+            response = codepipeline.get_pipeline_state( name=pipeline_name )
+            print('get_pipeline_state', response)
+            # Get the approve train status token
+            stage_name = 'Train'
+            action_name = 'ApproveTrain'
+            token = None
+            for stageState in response['stageStates']:
+              if stageState['stageName'] == stage_name:
+                for actionState in stageState['actionStates']:
+                  if actionState['actionName'] == action_name:
+                    if not 'latestExecution' in actionState:
+                      raise(Exception("Approval not available"))
+                    else:
+                      latestExecution = actionState['latestExecution']
+                      if latestExecution['status'] != 'InProgress':
+                        raise(Exception("Train approval is not awaiting for approval: %s" % latestExecution['status']))
+                      token = latestExecution['token']
+            if token is None:
+              raise(Exception("Action token wasn't found. Aborting..."))
+            # Check status
+            if status == 'SUCCEEDED':
+              result={
+                  'summary': 'Model trained successfully',
+                  'status': 'Approved'
+                }
+            else:
+              result={
+                'summary': 'Workflow unsuccesful with status: {}'.format(status),
+                'status': 'Rejected'
+              }
+            # Update approval
+            response = codepipeline.put_approval_result(
+              pipelineName=pipeline_name,
+              stageName=stage_name,
+              actionName=action_name,
+              result=result,
+              token=token
+            )
+            print('put_approval_result', response)
+            return "Done"
+      Description: "Function called when a step function workflow is complete"
+      
+  MLOpsJobMonitorPermissions:
+    Type: "AWS::Lambda::Permission"
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MLOpsJobMonitor
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt JobMonitoringEvent.Arn
+
+  JobMonitoringEvent:
+    Type: "AWS::Events::Rule"
+    Properties: 
+      Description: "Event that will be called when the step function completes"
+      Name: !Sub ${AWS::StackName}-mlops-monitor
+      EventPattern: 
+        source: 
+          - "aws.states"
+        detail-type: 
+          - "Step Functions Execution Status Change"
+        detail: 
+          stateMachineArn:
+            - !Ref WorkflowPipeline
+      Targets:
+        - Arn: !GetAtt MLOpsJobMonitor.Arn
+          Id: !Sub ${AWS::StackName}-mlops-event
+    DependsOn: MLOpsJobMonitor
+  
+  SwitchDeployment:
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      FunctionName: !Sub ${AWS::StackName}-mlops-switch-deployment
+      Handler: index.lambda_handler
+      MemorySize: 512
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.6
+      Timeout: 60
+      Code: 
+        ZipFile: !Sub |
+          import boto3
+          import json
+          ssm = boto3.client('ssm')
+          codepipeline = boto3.client('codepipeline')
+          def lambda_handler(event, context):
+            print('event', json.dumps(event))
+            pipeline_name = '${AWS::StackName}'
+            jobId = event["CodePipeline.job"]["id"]
+            try:
+              # Get the deployment parameters
+              config = event["CodePipeline.job"]['data']['actionConfiguration']['configuration']
+              endpoint_name = config['UserParameters']
+              print('set param: {} to: {}'.format(pipeline_name, endpoint_name))
+              # Store cooldown endpoint in parameter
+              response = ssm.put_parameter(
+                Name=pipeline_name,
+                Value=endpoint_name,
+                Type='String',
+                Overwrite=True,
+              )
+              response = codepipeline.put_job_success_result(jobId=jobId)
+              print('put_job_success_result', response)
+            except Exception as e:
+              print(e)
+              resp = codepipeline.put_job_failure_result(
+                  jobId=jobId,
+                  failureDetails={
+                      'type': 'ConfigurationError',
+                      'message': str(e),
+                      'externalExecutionId': context.aws_request_id
+                  }
+              )
+            return "Done"
+      Description: "Update SSM parameter with cooldown endpoint"
+
+  WorkflowPipeline:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${AWS::StackName}
+      RoleArn: !GetAtt WorkflowExecutionRole.Arn
+      DefinitionString: |-
+        {
+          "Comment": "Place holder for sagemaker training",
+          "StartAt": "Plaecholder",
+          "States": {
+            "Plaecholder": {
+              "Type": "Pass",
+              "Result": "World",
+              "End": true
+            }
+          }
+        }
+
+  DeployPipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+          Type: S3
+          Location: !Ref ArtifactStoreBucket
+      Stages:
+        -
+          Name: Source
+          Actions: 
+            - 
+              Name: GitHubSource
+              ActionTypeId: 
+                Category: Source
+                Owner: ThirdParty
+                Version: 1
+                Provider: GitHub
+              OutputArtifacts: 
+                - Name: ModelSourceOutput
+              Configuration: 
+                Owner: !Ref 'GitHubUser'
+                Repo: !Ref 'Repo'
+                Branch: !Ref 'Branch'
+                OAuthToken: !Ref 'GitHubToken'
+              RunOrder: 1
+        -
+          Name: Train
+          Actions:
+            -
+              Name: TrainModel
+              Namespace: TrainingVariables   
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              OutputArtifacts:
+                - Name: ModelTrainOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref TrainModelProject
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}","type":"PLAINTEXT"},{"name":"WORKFLOW_ARN","value":"${WorkflowPipeline}","type":"PLAINTEXT"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"},{"name":"ARTIFACT_BUCKET","value":"${ArtifactStoreBucket}","type":"PLAINTEXT"}]'
+              RunOrder: 1
+            -
+              Name: ApproveTrain
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                  CustomData: 'Step functions completing will automatically approve this'
+              RunOrder: 2
+        -
+          Name: Deploy
+          Actions:
+            - 
+              Name: DeployBlueGreen
+              InputArtifacts:
+                - Name: ModelSourceOutput
+                - Name: ModelTrainOutput
+              OutputArtifacts:
+                - Name: ModelDeployOutput
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ActionMode: REPLACE_ON_FAILURE
+                RoleArn: !GetAtt CFNRole.Arn
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+                StackName: !Sub ${AWS::StackName}-deploy
+                TemplateConfiguration: ModelTrainOutput::cloud_formation/deploy.json
+                TemplatePath: ModelTrainOutput::cloud_formation/deploy.yaml
+                OutputFileName: cloud_formation/deploy_output.json
+              RunOrder: 1
+            -
+              Name: SwitchDeployment
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: 1
+                Provider: Lambda
+              Configuration:
+                  FunctionName:
+                    Ref: SwitchDeployment
+                  UserParameters: "#{TrainingVariables.ENDPOINT_NAME}"
+              RunOrder: 2
+        -
+          Name: Monitor
+          Actions:
+            -
+              Name: SuggestBaseline
+              Namespace: BaselineVariables
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref SuggestBaselineProject
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"STACK_NAME","value":"${AWS::StackName}","type":"PLAINTEXT"}]'
+              RunOrder: 1
+            -
+              Name: CreateSchedule
+              InputArtifacts:
+                - Name: ModelSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CreateScheduleProject
+                EnvironmentVariables: !Sub '[{"name":"MODEL_BUCKET","value":"${ModelBucket}","type":"PLAINTEXT"},{"name":"PREFIX","value":"${BucketPrefix}","type":"PLAINTEXT"},{"name":"SAGEMAKER_EXECUTION_ARN","value":"${SagemakerExecutionRole.Arn}"},{"name":"ENDPOINT_NAME","value":"#{TrainingVariables.ENDPOINT_NAME}"},{"name":"PROCESSING_JOB_NAME","value":"#{BaselineVariables.PROCESSING_JOB_NAME}"}]'
+              RunOrder: 2
+           
+  SagemakerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-sagemaker-role 
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [sagemaker.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:DeleteObject
+                - s3:ListBucket
+                Effect: Allow
+                Resource: arn:aws:s3:::*
+
+  WorkflowExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-stepfunctions-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [states.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: SageMakerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - sagemaker:*
+                - lambda:InvokeFunction
+                Resource: "*"
+                Effect: Allow
+              - Action:
+                - iam:PassRole
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: sagemaker.amazonaws.com
+                Effect: Allow
+              - Action:
+                - events:PutTargets
+                - events:PutRule
+                - events:DescribeRule
+                Resource:
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTrainingJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTransformJobsRule
+                - arn:aws:events:*:*:rule/StepFunctionsGetEventsForSageMakerTuningJobsRule
+                Effect: Allow
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-lambda-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [lambda.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole           
+      Policies:
+        - PolicyName: LambdaRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - codepipeline:GetPipelineState
+                  - codepipeline:PutApprovalResult
+                  - codepipeline:PutJobSuccessResult
+                  - codepipeline:PutJobFailureResult
+                  - ssm:PutParameter  
+                Effect: Allow
+                Resource: '*'
+
+  CFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-cfn-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [cloudformation.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess # TEMP: Will need to add specific permissions to support delete stack
+      Policies:
+        - PolicyName: CloudFormationRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - iam:PassRole
+                  - application-autoscaling:*
+                  - codedeploy:*
+                  - lambda:*
+                  - cloudwatch:PutMetricAlarm
+                  - cloudwatch:DescribeAlarms
+                  - cloudwatch:DeleteAlarms
+                Effect: Allow
+                Resource: '*'
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-pipeline-role
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - s3:*
+                - codebuild:*
+                - cloudformation:*
+                - lambda:*
+                - iam:PassRole
+                - sns:Publish
+                Effect: Allow
+                Resource: '*'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-codebuild-role
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: ['sts:AssumeRole']
+            Effect: Allow
+            Principal:
+              Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AWSStepFunctionsFullAccess
+      Policies:
+        - PolicyName: TrainModel
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - codepipeline:*
+                - sagemaker:*
+                - s3:*
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+                - ssm:GetParameter
+                Effect: Allow
+                Resource: '*'
+              - Action:
+                - iam:PassRole
+                Effect: Allow
+                Resource: 
+                  - !GetAtt SagemakerExecutionRole.Arn
+                  - !GetAtt WorkflowExecutionRole.Arn
+    
+Outputs:
+  WorkflowPipeline:
+    Description: The workflow code pipeline
+    Value: !Ref WorkflowPipeline

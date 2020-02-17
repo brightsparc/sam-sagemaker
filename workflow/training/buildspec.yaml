@@ -1,0 +1,38 @@
+version: 0.2
+
+env:
+  exported-variables:
+    - TRAINING_JOB_NAME
+    - ENDPOINT_NAME
+    - STEPFUNCTION_ARN
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.7
+    commands:
+      - echo "Installing requirements and aws datascience sdk form source"
+      - pip install -r workflow/training/requirements.txt
+      - pip install git+https://github.com/aws/aws-step-functions-data-science-sdk-python
+  pre_build:
+    commands:
+      - echo "Running data_prep.py"
+      - python workflow/training/data_prep.py $MODEL_BUCKET $PREFIX
+  build:
+    commands:
+      - echo "Running create_trial.py"
+      - python workflow/training/create_trial.py $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION 
+      - echo "Running training.py"
+      - python workflow/training/training.py $MODEL_BUCKET $PREFIX $SAGEMAKER_EXECUTION_ARN $WORKFLOW_ARN $STACK_NAME $CODEBUILD_RESOLVED_SOURCE_VERSION
+  post_build:
+    commands:
+      - echo "Exporting env vars"
+      - source cloud_formation/training.vars
+      - echo "Create regression commit file and package CFN artifacts"
+      - echo $CODEBUILD_RESOLVED_SOURCE_VERSION > regression/commit.txt 
+      - echo $CODEBUILD_BUILD_ID >> regression/commit.txt # Add build ID when commit doesn't change
+      - aws cloudformation package --template-file template.yaml --output-template-file cloud_formation/deploy.yaml --s3-bucket $ARTIFACT_BUCKET
+  
+artifacts:
+  files:
+    - 'cloud_formation/*'
